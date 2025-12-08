@@ -1,0 +1,7 @@
+pandas>=1.4
+numpy>=1.23
+scikit-learn>=1.1
+imbalanced-learn>=0.9
+SQLAlchemy>=1.4
+psycopg2-binary>=2.9
+matplotlib>=3.5
