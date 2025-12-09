@@ -1,8 +1,8 @@
 """
 Instrumentación de la tecnología - Ejemplo didáctico
 
-Este script crea un flujo reducido y realista para instrumentar
-un proyecto de detección de fraude financiero usando Python.
+Este script crea un flujo reducido para instrumentar
+el proyecto de detección de fraude financiero usando Python.
 
 Funciones principales (cumpliendo la solicitud):
 - cargar_datos()
@@ -15,7 +15,7 @@ El script intenta conectarse a PostgreSQL vía la variable de entorno
 `DATABASE_URL` (ej: postgresql+psycopg2://user:pass@host:5432/dbname).
 Si la conexión falla, usa un fallback a SQLite local para demostración.
 
-Está documentado en español y contiene manejo básico de errores.
+contiene manejo básico de errores.
 """
 
 from __future__ import annotations
