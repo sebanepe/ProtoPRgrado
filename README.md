@@ -1,57 +1,30 @@
-# Instrumentación de la tecnología — Ejemplo de referencia
+# fraud-detection-system
 
-Este repositorio contiene un ejemplo didáctico y autocontenido para la sección
-"Instrumentación de la Tecnología" de un proyecto de detección de fraude financiero.
+Proyecto prototipo académico para detección de fraude bancario utilizando machine learning.
 
-Resumen:
+Estructura básica creada para un prototipo con API en FastAPI, conexión a PostgreSQL mediante SQLAlchemy, validación con Pydantic y componentes modulares para modelos, esquemas, repositorios, servicios y ML.
 
-- `src/instrumentacion.py`: script principal con funciones modulares: `cargar_datos`, `preprocesar`, `entrenar_modelo`, `evaluar_modelo`, `guardar_resultados`.
-- `requirements.txt`: dependencias necesarias.
+Cómo ejecutar (desarrollo):
 
-Características principales:
+1. Crear y activar un entorno virtual (por ejemplo, `python -m venv .venv`).
+2. Instalar dependencias:
 
-- Simula un dataset típico (monto, hora, canal, tipo_transacción, ubicación, etiqueta_fraude).
-- Preprocesamiento mínimo y balanceo con `SMOTE`.
-- Entrenamiento de un `DecisionTreeClassifier` y evaluación (Precision, Recall, F1, AUC).
-- Guarda resultados de métricas y parámetros en una base de datos usando SQLAlchemy.
-
-Requisitos:
-
-- Python 3.10+
-- Instalar dependencias:
-
-  ```powershell
-  python -m venv .venv; .venv\Scripts\Activate.ps1
-  pip install -r requirements.txt
-  ```
-
-Conexión a PostgreSQL (opcional pero recomendado):
-
-- Defina la variable de entorno `DATABASE_URL` con el dialecto SQLAlchemy.
-  Ejemplo (PowerShell):
-
-  ```powershell
-  $env:DATABASE_URL = "postgresql+psycopg2://usuario:password@localhost:5432/mi_base"
-  ```
-
-- Si `DATABASE_URL` no está definida o falla la conexión, el script hará un fallback
-  a un archivo SQLite local `results_fallback.db` para que el ejemplo sea reproducible.
-
-Ejecutar el ejemplo:
-
-```powershell
-python src/instrumentacion.py
+```bash
+pip install -r requirements.txt
 ```
 
-Salida esperada:
+3. Configurar la variable de entorno `DATABASE_URL` (opcional). Por defecto se usa:
 
-- Mensajes en consola con progreso y métricas.
-- Un archivo `feature_importances.png` en la carpeta desde la que se ejecuta.
-- Un registro insertado en la tabla `experiment_results` de la base de datos (Postgres o SQLite fallback).
+```
+postgresql://postgres:password@localhost:5432/fraud_db
+```
 
-Notas didácticas:
+4. Ejecutar la API:
 
-- El script es deliberadamente simple y está diseñado como apéndice técnico: explica cada paso,
-  usa técnicas reales (SMOTE, train/test split, métricas relevantes) y muestra cómo persistir resultados.
-- Para producción habría que añadir: pipeline serializable, pruebas unitarias, validación más estricta,
-  gestión de secretos en lugar de variables de entorno, y registro de modelos (model registry).
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+Notas:
+- Este repositorio contiene un prototipo académico y no está listo para producción.
+- Las carpetas `data/`, `notebooks/` y `powerbi/` están reservadas para datos, experimentos y reportes.
