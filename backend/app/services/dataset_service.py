@@ -22,10 +22,15 @@ def _read_csv(file: BinaryIO) -> pd.DataFrame:
     file.seek(0)
     try:
         df = pd.read_csv(file)
+    except pd.errors.EmptyDataError:
+        raise ValueError("Uploaded file is empty")
     except Exception:
         # try bytes buffer
         file.seek(0)
-        df = pd.read_csv(BytesIO(file.read()))
+        try:
+            df = pd.read_csv(BytesIO(file.read()))
+        except pd.errors.EmptyDataError:
+            raise ValueError("Uploaded file is empty")
     return df
 
 

@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 from backend.app.repositories import alert_repository
 from backend.app.models.models import ModelResult, Transaction
 from backend.app.ml.scoring import load_model_by_info, risk_score_from_model, classify_risk
+from backend.app.services import settings_service
 import os
 
 DEFAULT_MODELS_DIR = os.path.join("backend", "app", "ml", "saved_models")
-ALERT_THRESHOLD = float(os.getenv("ALERT_THRESHOLD", "0.7"))
 
 
 def _get_active_model_row(db: Session) -> ModelResult | None:
@@ -23,15 +23,17 @@ def generate_alerts_from_batch(db: Session, transactions: List[Dict[str, Any]], 
     model = load_model_by_info(mr.model_name, mr.version, models_dir=models_dir)
 
     # prepare feature dicts for scoring: expect transactions contain feature columns used in model
-    features = [ {k: v for k, v in t.items() if k not in ("transaction_id", "transaction_datetime", "device_id", "customer_hash")} for t in transactions ]
+    features = [ {k: v for k, v in t.items() if k not in ("id", "transaction_id", "transaction_datetime", "device_id", "customer_hash")} for t in transactions ]
 
     scores = risk_score_from_model(model, mr.model_name, features)
     created = []
     for tx, score in zip(transactions, scores):
         level = classify_risk(float(score))
         tx_id = tx.get("id") or tx.get("transaction_id")
-        # only create alert if score >= ALERT_THRESHOLD
-        if float(score) >= ALERT_THRESHOLD:
+        # determine threshold from active config or env
+        threshold = settings_service.get_active_threshold(db)
+        # only create alert if score >= threshold
+        if float(score) >= threshold:
             # If transaction id refers to actual Transaction PK, use it; otherwise assume absent and set to None
             try:
                 trans_pk = int(tx_id) if tx_id is not None and str(tx_id).isdigit() else None

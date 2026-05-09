@@ -104,3 +104,16 @@ class SystemLog(Base):
 
 # Indexes for performance
 # Indexes defined via column `index=True` flags above; avoid duplicate Index definitions
+
+
+class ModelConfig(Base):
+    __tablename__ = "model_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    active_model_id = Column(Integer, ForeignKey("model_results.id", ondelete="SET NULL"), nullable=True)
+    alert_threshold = Column(Float, nullable=False, default=0.7)
+    updated_by = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    model_result = relationship("ModelResult")

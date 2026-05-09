@@ -13,7 +13,8 @@ def _find_model_file(models_dir: str, model_name: str, version: str) -> str | No
         if not fn.endswith(".pkl"):
             continue
         name_part = fn[:-4]
-        if name_part == f"{model_name}_{version}":
+        # Accept either exact "name_version" or just the model name filename
+        if name_part == f"{model_name}_{version}" or name_part == model_name:
             return os.path.join(models_dir, fn)
     return None
 
