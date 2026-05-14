@@ -1,3 +1,15 @@
+from backend.app.schemas.auth import UserCreate
+from backend.app.services import auth_service
+
+
+def test_register_and_authenticate(db_session):
+    user_in = UserCreate(full_name="Test User", email="test@example.com", password="s3cret", role="FRAUD_ANALYST")
+    user = auth_service.register_user(db_session, user_in)
+    assert user.email == "test@example.com"
+
+    auth = auth_service.authenticate_user(db_session, "test@example.com", "s3cret")
+    assert auth is not None
+    assert auth.email == "test@example.com"
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from backend.app.database import Base

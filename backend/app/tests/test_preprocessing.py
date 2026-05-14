@@ -1,3 +1,49 @@
+import pandas as pd
+from backend.app.ml.preprocessing import preprocess_dataframe
+
+
+def test_preprocess_basic_missing_and_scaling():
+    df = pd.DataFrame([
+        {
+            "transaction_id": "t1",
+            "amount": "100",
+            "transaction_type": "purchase",
+            "channel": None,
+            "location": "A",
+            "transaction_datetime": "2021-01-01",
+            "is_fraud": 0,
+        },
+        {
+            "transaction_id": "t2",
+            "amount": None,
+            "transaction_type": None,
+            "channel": "web",
+            "location": "B",
+            "transaction_datetime": "2021-01-02",
+            "is_fraud": 1,
+        },
+        # this row lacks transaction_datetime and should be dropped
+        {
+            "transaction_id": "t3",
+            "amount": 50,
+            "transaction_type": "refund",
+            "channel": "pos",
+            "location": "C",
+            "transaction_datetime": None,
+            "is_fraud": 0,
+        },
+    ])
+
+    processed, summary = preprocess_dataframe(df, apply_smote=False)
+
+    # t3 should be dropped due to missing datetime
+    assert summary["after_clean"] == 2
+    # amount_scaled column should exist
+    assert "amount_scaled" in processed.columns
+    # is_fraud values preserved in output
+    assert "is_fraud" in processed.columns
+    # columns_transformed is non-empty
+    assert len(summary["columns_transformed"]) > 0
 import tempfile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

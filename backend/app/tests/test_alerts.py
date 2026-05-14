@@ -1,5 +1,53 @@
 import os
 import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+
+from backend.app.models.models import ModelResult, Transaction
+from datetime import datetime
+from backend.app.services import settings_service
+from backend.app.services.alert_service import generate_alerts_from_batch
+
+
+def test_generate_alerts_respects_threshold(db_session, tmp_path):
+    # create a very simple model and save it
+    X = np.array([[0.0, 0.0], [1.0, 1.0]])
+    y = np.array([0, 1])
+    clf = LogisticRegression()
+    clf.fit(X, y)
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    model_file = models_dir / "testmodel_1.pkl"
+    joblib.dump(clf, str(model_file))
+
+    # create an active model row
+    mr = ModelResult(model_name="testmodel", version="1", is_active=True)
+    db_session.add(mr)
+    db_session.commit()
+    db_session.refresh(mr)
+
+    # create a transaction to point alerts to
+    tx = Transaction(transaction_id="tx123", amount=10.0, transaction_type="purchase", channel="web", location="loc", device_id="d1", customer_hash="c1", transaction_datetime=datetime(2021,1,1), is_fraud=False)
+    db_session.add(tx)
+    db_session.commit()
+    db_session.refresh(tx)
+
+    # set config with threshold 0.5
+    settings_service.set_model_config(db_session, active_model_id=mr.id, alert_threshold=0.5, updated_by="tester")
+
+    # a transaction likely to be scored high
+    transactions = [
+        {"id": tx.id, "feature1": 1.0, "feature2": 1.0},
+    ]
+
+    created = generate_alerts_from_batch(db_session, transactions, models_dir=str(models_dir))
+
+    # expect at least one alert created
+    assert isinstance(created, list)
+    assert len(created) >= 1
+import os
+import joblib
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sqlalchemy import create_engine
