@@ -1,0 +1,6 @@
+transaction_type_purchase,transaction_type_transfer,channel_mobile,channel_web,location_here,location_loc1,location_loc2,amount_scaled,is_fraud
+True,False,False,True,False,True,False,-1.090325712197287,0
+False,True,True,False,False,False,True,1.1426761182799923,1
+True,False,False,True,True,False,False,-0.10470081216541151,0
+True,False,False,True,False,True,False,-1.090325712197287,0
+False,True,True,False,False,False,True,1.1426761182799923,1

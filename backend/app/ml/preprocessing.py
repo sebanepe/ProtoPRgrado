@@ -43,13 +43,17 @@ def preprocess_dataframe(
         summary.update({"after": 0, "columns_transformed": [], "fraud_ratio": {}})
         return pd.DataFrame(), summary
 
+    # Work on a copy to avoid mutating the caller's DataFrame
+    df = df.copy()
+
     # Drop duplicates based on transaction_id
     df = df.drop_duplicates(subset=["transaction_id"])
 
     # Handle missing values
     if "amount" in df.columns:
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
-        df["amount"].fillna(df["amount"].median() if not df["amount"].isna().all() else 0.0, inplace=True)
+        # avoid chained-assignment / inplace to be copy-on-write safe
+        df["amount"] = df["amount"].fillna(df["amount"].median() if not df["amount"].isna().all() else 0.0)
 
     for col in ["transaction_type", "channel", "location"]:
         if col in df.columns:

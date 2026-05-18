@@ -57,3 +57,27 @@ def classify_risk(score: float) -> str:
     if score >= 0.3:
         return "MEDIUM"
     return "LOW"
+
+
+def classify_risk_level(score: float, low_medium_threshold: float = 0.5, medium_high_threshold: float = 0.8) -> str:
+    """Normalize and classify a risk score using configurable thresholds.
+
+    - Scores < low_medium_threshold -> LOW
+    - low_medium_threshold <= score < medium_high_threshold -> MEDIUM
+    - score >= medium_high_threshold -> HIGH
+
+    Scores outside [0,1] are clamped to that range.
+    """
+    try:
+        s = float(score)
+    except Exception:
+        s = 0.0
+    # clamp
+    if s != s:  # NaN
+        s = 0.0
+    s = max(0.0, min(1.0, s))
+    if s >= medium_high_threshold:
+        return "HIGH"
+    if s >= low_medium_threshold:
+        return "MEDIUM"
+    return "LOW"
