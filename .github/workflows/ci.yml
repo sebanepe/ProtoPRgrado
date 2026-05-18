@@ -7,6 +7,8 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    - cron: '0 2 * * *' # nightly at 02:00 UTC
 
 jobs:
   tests:
@@ -55,3 +57,39 @@ jobs:
             reports/junit.xml
             reports/report.html
             coverage.xml
+
+  regression_nightly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-cov pytest-html
+
+      - name: Run regression suite
+        run: |
+          mkdir -p reports
+          pytest backend/app/tests/regression --junitxml=reports/regression-junit.xml --html=reports/regression-report.html -q
+
+      - name: Upload regression reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-reports
+          path: |
+            reports/regression-junit.xml
+            reports/regression-report.html
