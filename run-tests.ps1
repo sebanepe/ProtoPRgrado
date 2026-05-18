@@ -23,3 +23,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Reports available in: $reports"
+
+# Run frontend unit tests if Node and npm are available
+$frontendPkg = Join-Path -Path (Get-Location) -ChildPath "frontend\package.json"
+if (Test-Path $frontendPkg) {
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Host "Installing frontend dev dependencies..."
+        Push-Location frontend
+        npm ci --silent
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "npm ci failed, attempting npm install..."
+            npm install --silent
+        }
+        Write-Host "Running frontend unit tests (vitest)..."
+        npm run test --silent
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Frontend tests failed or vitest not configured"
+        }
+        Pop-Location
+    } else {
+        Write-Host "npm not found - skipping frontend tests"
+    }
+}

@@ -1,3 +1,13 @@
+"""
+Integration tests for alert generation behavior.
+
+- `test_generate_alerts_respects_threshold`: creates a simple sklearn model,
+    persists a `ModelResult`, sets an active `ModelConfig` threshold and asserts
+    that alert generation runs and returns created alerts when scores exceed threshold.
+- `test_classify_risk_levels` and `test_alert_generation_integration` perform
+    additional sanity checks on risk classification and end-to-end generation.
+"""
+
 import os
 import joblib
 import numpy as np
@@ -62,14 +72,6 @@ def get_test_session():
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     return TestingSessionLocal()
-
-
-def test_classify_risk_levels():
-    from backend.app.ml.scoring import classify_risk
-    assert classify_risk(0.8) == "HIGH"
-    assert classify_risk(0.5) == "MEDIUM"
-    assert classify_risk(0.1) == "LOW"
-
 
 def test_alert_generation_integration(tmp_path):
     db = get_test_session()

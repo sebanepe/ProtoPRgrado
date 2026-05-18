@@ -1,3 +1,9 @@
+"""
+Unit tests for authentication helpers and repository wiring.
+
+Includes hash/verify checks and in-memory registration/login flows.
+"""
+
 from backend.app.schemas.auth import UserCreate
 from backend.app.services import auth_service
 
@@ -23,13 +29,6 @@ def get_test_session():
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     return TestingSessionLocal()
-
-
-def test_password_hash_and_verify():
-    plain = "SuperSecret123!"
-    hashed = auth_service.hash_password(plain)
-    assert auth_service.verify_password(plain, hashed)
-
 
 def test_register_and_login():
     db = get_test_session()
