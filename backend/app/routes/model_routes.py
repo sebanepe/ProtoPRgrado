@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import model_service
 from backend.app.services.permission_service import require_permission
+from backend.app.services.authorization import get_user_from_header
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -17,7 +18,7 @@ def train_models(db: Session = Depends(get_db), _auth=Depends(require_permission
 
 
 @router.get("/results")
-def get_results(db: Session = Depends(get_db)):
+def get_results(db: Session = Depends(get_db), _auth=Depends(get_user_from_header)):
     return {"results": model_service.list_results(db)}
 
 

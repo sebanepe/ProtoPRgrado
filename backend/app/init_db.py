@@ -203,7 +203,12 @@ def ensure_admin_user(session: Session, roles: dict):
 
 
 def main():
-    ensure_tables()
+    try:
+        ensure_tables()
+    except OperationalError as oe:
+        msg = f"Could not connect to the database: {oe}\nEnsure your DATABASE_URL is correct and the DB is reachable."
+        print(msg)
+        raise
     # compatibility: add role_id to users table if missing (dev sqlite)
     try:
         ensure_user_role_column()

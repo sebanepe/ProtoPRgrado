@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import settings_service
 from backend.app.services.permission_service import require_permission
+from backend.app.services.authorization import get_user_from_header
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 @router.get("/model-config")
-def get_model_config(db: Session = Depends(get_db)):
+def get_model_config(db: Session = Depends(get_db), _auth=Depends(get_user_from_header)):
     cfg = settings_service.get_active_config(db)
     if not cfg:
         return {"model_config": None}

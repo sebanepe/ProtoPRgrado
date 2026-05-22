@@ -32,8 +32,9 @@ export async function login(credentials){
     if (e && e.response) {
       throw e
     }
-    // fallback simulation only when no server response (offline / network error / timeout)
-    if(credentials && credentials.email && credentials.password){
+    // fallback simulation only when running tests (do not simulate in real dev/prod)
+    const isTest = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_TEST === 'true')
+    if (isTest && credentials && credentials.email && credentials.password) {
       return { id: 1, email: credentials.email, full_name: 'Simulated User', token: 'simulated-token' }
     }
     throw e
@@ -52,4 +53,5 @@ export async function listAlerts(){ return api.get('/alerts').then(r=> r.data &&
 export async function listModels(){ return api.get('/models/results').then(r=> r.data && r.data.results ? r.data.results : []) }
 export async function getModelConfig(){ return api.get('/settings/model-config').then(r=> r.data && r.data.model_config ? r.data.model_config : null) }
 export async function setModelConfig(payload){ return api.post('/settings/model-config', payload).then(r=> r.data && r.data.model_config ? r.data.model_config : null) }
+export async function me(){ return api.get('/auth/me').then(r=> r.data).catch(()=>null) }
 export default api

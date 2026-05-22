@@ -5,6 +5,33 @@ from typing import Optional, Set
 from backend.app.repositories import user_repository
 from backend.app.database import get_db
 from backend.app.services.jwt_service import decode_access_token
+from fastapi.security import OAuth2PasswordBearer
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Dependency to return the current user based on an OAuth2 bearer token.
+    Use this for endpoints that only require authentication (no specific permission check).
+    """
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    user = None
+    user_id = payload.get("user_id")
+    if user_id:
+        user = user_repository.get_user(db, user_id)
+    if not user:
+        sub = payload.get("sub")
+        if sub:
+            user = user_repository.get_user_by_email(db, sub)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
+    return user
 
 
 # Permission strings
