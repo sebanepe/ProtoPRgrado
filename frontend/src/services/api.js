@@ -76,6 +76,8 @@ export async function importDataset(file){
   return api.post('/datasets/import', form, { headers: {'Content-Type':'multipart/form-data'} }).then(r=>r.data)
 }
 export async function runPreprocessing(){ return api.post('/preprocessing/run').then(r=>r.data) }
+export async function listPreprocessingRuns(){ return api.get('/preprocessing/runs').then(r=> r.data || []) }
+export async function previewPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/preview`).then(r=> r.data) }
 export async function listDatasets(params){ return api.get('/datasets', { params }).then(r=> r.data && r.data.datasets ? r.data.datasets : []) }
 export async function previewDataset(id, rows=10){ return api.get(`/datasets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
 export async function deleteDataset(id){ return api.delete(`/datasets/${id}`).then(r=> r.data) }

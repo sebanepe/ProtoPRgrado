@@ -5,6 +5,7 @@ from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
 from typing import Tuple, Dict
 from backend.app.models.models import Transaction
+from backend.app.ml.proxy_labeling import generate_proxy_fraud_label
 
 
 def fetch_transactions_df(db) -> pd.DataFrame:
@@ -46,6 +47,14 @@ def preprocess_dataframe(
     # Work on a copy to avoid mutating the caller's DataFrame
     df = df.copy()
 
+    # Generate proxy labeling and behavioral features (adds is_fraud, is_fraud_proxy,
+    # behavioral_risk_score, independent_rule_groups, and many binary rule columns).
+    try:
+        df = generate_proxy_fraud_label(df)
+    except Exception:
+        # if proxy labeling fails, continue without it but ensure downstream code handles missing cols
+        pass
+
     # Drop duplicates based on transaction_id
     df = df.drop_duplicates(subset=["transaction_id"])
 
@@ -86,7 +95,25 @@ def preprocess_dataframe(
 
     # Prepare X and y
     y = df_encoded["is_fraud"].astype(int)
-    drop_cols = ["transaction_id", "transaction_datetime", "is_fraud", "device_id", "customer_hash", "amount"]
+    # Columns that must NOT be used as features (sensitive / leakage)
+    forbidden = [
+        "response_code",
+        "codigo_respuesta",
+        "CODIGO_RESPUESTA",
+        "RESPUESTA",
+        "cod_respuesta",
+        "normalized_response_code",
+        "response_high_risk",
+        "response_code_reason",
+        "is_fraud",
+        "is_fraud_proxy",
+        "label_source",
+        "fraud_label_reason",
+        "behavioral_risk_score",
+        "independent_rule_groups",
+    ]
+
+    drop_cols = ["transaction_id", "transaction_datetime", "device_id", "customer_hash", "amount"] + forbidden
     X = df_encoded.drop(columns=[c for c in drop_cols if c in df_encoded.columns])
 
     summary["columns_transformed"] = list(X.columns)
@@ -121,6 +148,10 @@ def preprocess_dataframe(
 
     # Construct final processed dataframe for saving
     processed = X_res.copy()
+    # include audit columns for analysis but not training features
+    audit_cols = [c for c in ["behavioral_risk_score", "independent_rule_groups", "fraud_label_reason"] if c in df.columns]
+    for c in audit_cols:
+        processed[c] = df[c].values
     processed["is_fraud"] = y_res
 
     return processed, summary
