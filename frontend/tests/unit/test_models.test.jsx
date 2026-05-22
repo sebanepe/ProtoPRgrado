@@ -13,8 +13,10 @@ describe('Models page', () => {
 
   it('shows model entries from API', async () => {
     render(<Models />)
+    // espera que la API haya sido consultada
     await waitFor(() => expect(listModels).toHaveBeenCalled())
     const matches = screen.getAllByText(/m/i)
+    // debe renderizar al menos una entrada de modelo
     expect(matches.length).toBeGreaterThan(0)
   })
 })

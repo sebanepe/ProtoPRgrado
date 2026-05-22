@@ -28,6 +28,7 @@ describe('API service functions', () => {
     api.default.get.mockResolvedValueOnce({ data: { status: 'ok' } })
     const res = await api.health()
     expect(api.default.get).toHaveBeenCalledWith('/health')
+    // verifica que la función devuelve el objeto de estado esperado
     expect(res).toEqual({ status: 'ok' })
   })
 
@@ -35,7 +36,9 @@ describe('API service functions', () => {
     api.default.get.mockResolvedValueOnce({ data: { results: [{ id: 1, model_name: 'm' }] } })
     const res = await api.listModels()
     expect(api.default.get).toHaveBeenCalledWith('/models/results')
+    // la respuesta debe ser un array de modelos
     expect(Array.isArray(res)).toBe(true)
+    // el primer elemento debe tener el nombre de modelo esperado
     expect(res[0].model_name).toBe('m')
   })
 
@@ -44,6 +47,7 @@ describe('API service functions', () => {
     const payload = { active_model_id: 1, alert_threshold: 0.5 }
     const res = await api.setModelConfig(payload)
     expect(api.default.post).toHaveBeenCalledWith('/settings/model-config', payload)
+    // la respuesta debe contener el id del model_config devuelto por la API
     expect(res.id).toBe(1)
   })
 })

@@ -32,15 +32,15 @@ def test_permissions_and_user_permissions(db_session):
     db_session.refresh(user)
 
     perms = get_permissions_for_role(db_session, "DATA_SCIENTIST")
-    assert "dataset.import" in perms
+    assert "dataset.import" in perms  # permiso asignado al rol debe aparecer
 
     user_perms = get_user_permissions(db_session, user.id)
-    assert "dataset.import" in user_perms
+    assert "dataset.import" in user_perms  # permiso del rol debe reflejarse en el usuario
 
-    # direct check
-    assert user_has_permission(db_session, user, "dataset.import") is True
-    # legacy mapping should also work
-    assert user_has_permission(db_session, user, "import_data") is True
+    # comprobación directa de permiso
+    assert user_has_permission(db_session, user, "dataset.import") is True  # usuario tiene permiso
+    # la antigua clave 'import_data' debe mapearse correctamente
+    assert user_has_permission(db_session, user, "import_data") is True  # legacy mapping
 
 
 def test_admin_shortcut_grants_all(db_session):
@@ -49,7 +49,7 @@ def test_admin_shortcut_grants_all(db_session):
     db_session.commit()
     db_session.refresh(user)
 
-    assert user_has_permission(db_session, user, "any.permission") is True
+    assert user_has_permission(db_session, user, "any.permission") is True  # shortcut admin -> true
 
 
 def test_require_permission_dependency_allows_and_denies(db_session):
@@ -74,8 +74,8 @@ def test_require_permission_dependency_allows_and_denies(db_session):
     db_session.refresh(user)
 
     dep = require_permission("view_alerts")
-    # call dependency directly with created user and session
-    assert dep(user=user, db=db_session) is True
+    # call dependency directamente con el usuario creado
+    assert dep(user=user, db=db_session) is True  # dependencia debe permitir al usuario con el permiso
 
     # denied case
     role2 = Role(code="LIMITED", name="Limited")
@@ -91,4 +91,4 @@ def test_require_permission_dependency_allows_and_denies(db_session):
     dep2 = require_permission("view_alerts")
     with pytest.raises(HTTPException) as exc:
         dep2(user=user2, db=db_session)
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 403  # usuario sin permiso debe provocar 403

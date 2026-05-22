@@ -2,24 +2,31 @@ import pandas as pd
 import pytest
 from backend.app.ml.proxy_labeling import normalize_response_code, generate_proxy_fraud_label, calculate_behavioral_risk_score, calculate_independent_rule_groups
 
+# Pruebas unitarias para la lógica de proxy labeling
+# - Cada test valida un aspecto de las reglas débiles/firmes y del cálculo de features.
+# - Después de cada assert se añade un comentario en español explicando qué verifica.
+
 
 def test_normalize_response_code():
-    assert normalize_response_code(' 07 ') == '07'
-    assert normalize_response_code(7.0) == '07'
-    assert normalize_response_code(41) == '41'
-    assert normalize_response_code(None) == ''
+    # Normaliza espacios y tipos numéricos a código de dos dígitos
+    assert normalize_response_code(' 07 ') == '07'  # elimina espacios y formatea
+    assert normalize_response_code(7.0) == '07'  # convierte float->str con padding
+    assert normalize_response_code(41) == '41'  # entero convertido a string
+    assert normalize_response_code(None) == ''  # None produce cadena vacía
 
 
 def test_response_code_high_risk_labels():
     df = pd.DataFrame({'response_code': ['59', '43', '00']})
     df = generate_proxy_fraud_label(df)
-    assert df.iloc[0]['is_fraud'] == 1  # 59
-    assert df.iloc[1]['is_fraud'] == 1  # 43
-    assert df.iloc[2]['is_fraud'] == 0  # 00
+    # Códigos de respuesta de alto riesgo deben marcar como fraude proxy
+    assert df.iloc[0]['is_fraud'] == 1  # '59' => bandera de fraude por respuesta
+    assert df.iloc[1]['is_fraud'] == 1  # '43' => bandera de fraude por respuesta
+    assert df.iloc[2]['is_fraud'] == 0  # '00' => no debe marcar fraude
 
 
 def test_behavioral_weak_label_combination():
-    # create row that should activate multiple rule groups: high amount 1h, night, international, many tx day
+    # Crea transacciones que deberían activar múltiples grupos de reglas
+    # (alto monto 1h, transacción nocturna, internacional, múltiples clientes en el mismo comercio)
     rows = []
     # create 6 transactions for same customer same day including high amounts to trigger counts
     base_dt = pd.Timestamp('2026-05-20 01:30')
@@ -50,13 +57,13 @@ def test_behavioral_weak_label_combination():
         })
     df = pd.DataFrame(rows)
     df = generate_proxy_fraud_label(df)
-    # behavioral_risk_score within [0,1]
-    assert df['behavioral_risk_score'].between(0,1).all()
-    # independent groups should be >=3 for first row
-    assert df.iloc[0]['independent_rule_groups'] >= 3
-    # label should be flagged and fraud_label_reason should contain activated rules
-    assert df.iloc[0]['is_fraud'] == 1
-    assert isinstance(df.iloc[0]['fraud_label_reason'], str) and len(df.iloc[0]['fraud_label_reason']) > 0
+    # behavioral_risk_score debe estar normalizado entre 0 y 1
+    assert df['behavioral_risk_score'].between(0,1).all()  # verifica rango válido
+    # El conteo de grupos independientes debe ser >=3 en la primera fila
+    assert df.iloc[0]['independent_rule_groups'] >= 3  # comprueba activación de múltiples grupos
+    # El registro debe ser marcado como fraude y la razón debe ser texto no vacío
+    assert df.iloc[0]['is_fraud'] == 1  # la combinación de reglas activa la etiqueta
+    assert isinstance(df.iloc[0]['fraud_label_reason'], str) and len(df.iloc[0]['fraud_label_reason']) > 0  # razón presente
 
 
 def test_independent_rule_groups_counting():
@@ -65,5 +72,7 @@ def test_independent_rule_groups_counting():
         {'feature_high_amount':0, 'feature_night_transaction':1, 'feature_international_transaction':1, 'feature_many_customer_transactions_day':1, 'feature_many_merchants_customer_day':0, 'feature_tp_pem_07':0},
     ])
     counts = calculate_independent_rule_groups(df)
-    assert counts.iloc[0] >= 1
-    assert counts.iloc[1] >= 3
+    # Primer caso tiene al menos 1 grupo activo
+    assert counts.iloc[0] >= 1  # verifica que la función cuente grupos activos
+    # Segundo caso debería tener 3 o más grupos activos
+    assert counts.iloc[1] >= 3  # verifica que múltiples flags se cuentan correctamente

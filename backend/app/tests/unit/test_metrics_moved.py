@@ -17,7 +17,7 @@ def test_compute_metrics_basic_moved():
     metrics = compute_metrics(y_true, y_pred, y_score)
 
     assert round(metrics["precision"], 3) == 1.0
-    assert round(metrics["recall"], 3) == 0.5
-    assert round(metrics["f1_score"], 3) == round(2 * (1.0 * 0.5) / (1.0 + 0.5), 3)
-    assert metrics["roc_auc"] is not None
-    assert 0.0 <= metrics["roc_auc"] <= 1.0
+    assert round(metrics["recall"], 3) == 0.5  # recall esperado
+    assert round(metrics["f1_score"], 3) == round(2 * (1.0 * 0.5) / (1.0 + 0.5), 3)  # f1 calculada a partir de precision y recall
+    assert metrics["roc_auc"] is not None  # ROC AUC debe existir con scores válidos
+    assert 0.0 <= metrics["roc_auc"] <= 1.0  # ROC AUC debe estar en rango [0,1]

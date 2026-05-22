@@ -22,7 +22,7 @@ def test_valid_threshold_is_accepted(monkeypatch):
 
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create))
     cfg = settings_service.set_model_config(None, active_model_id=1, alert_threshold=0.75, updated_by="u")
-    assert cfg.alert_threshold == 0.75
+    assert cfg.alert_threshold == 0.75  # el umbral configurado se conserva en el objeto devuelto
 
 
 def test_threshold_less_than_zero_is_rejected(monkeypatch):
@@ -35,6 +35,7 @@ def test_threshold_less_than_zero_is_rejected(monkeypatch):
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create))
     with pytest.raises(ValueError):
         settings_service.set_model_config(None, active_model_id=1, alert_threshold=-0.1)
+    # umbrales negativos deben provocar error
 
 
 def test_threshold_greater_than_one_is_rejected(monkeypatch):
@@ -46,6 +47,7 @@ def test_threshold_greater_than_one_is_rejected(monkeypatch):
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create))
     with pytest.raises(ValueError):
         settings_service.set_model_config(None, active_model_id=1, alert_threshold=1.1)
+    # umbrales mayores a 1 deben provocar error
 
 
 def test_threshold_zero_is_valid_if_allowed(monkeypatch):
@@ -54,7 +56,7 @@ def test_threshold_zero_is_valid_if_allowed(monkeypatch):
 
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create))
     cfg = settings_service.set_model_config(None, active_model_id=2, alert_threshold=0.0)
-    assert cfg.alert_threshold == 0.0
+    assert cfg.alert_threshold == 0.0  # 0.0 es permitido y debe guardarse
 
 
 def test_threshold_one_is_valid_if_allowed(monkeypatch):
@@ -63,7 +65,7 @@ def test_threshold_one_is_valid_if_allowed(monkeypatch):
 
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create))
     cfg = settings_service.set_model_config(None, active_model_id=3, alert_threshold=1.0)
-    assert cfg.alert_threshold == 1.0
+    assert cfg.alert_threshold == 1.0  # 1.0 es permitido y debe guardarse
 
 
 def test_create_first_active_model_config(monkeypatch):
@@ -77,7 +79,7 @@ def test_create_first_active_model_config(monkeypatch):
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(create_config=fake_create, get_active_config=lambda db: None))
     cfg = settings_service.set_model_config(None, active_model_id=5, alert_threshold=0.5)
     assert called.get('created') is True
-    assert cfg.is_active
+    assert cfg.is_active  # la nueva configuración debe estar activa
 
 
 def test_new_active_config_deactivates_previous_one(monkeypatch):
@@ -95,17 +97,17 @@ def test_new_active_config_deactivates_previous_one(monkeypatch):
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(get_active_config=fake_get_active, create_config=fake_create))
     cfg = settings_service.set_model_config(None, active_model_id=9, alert_threshold=0.6)
     assert cfg.is_active
-    assert prev.is_active is False
+    assert prev.is_active is False  # la configuración anterior debe desactivarse
 
 
 def test_get_active_config_when_exists(monkeypatch):
     exp = DummyConfig(active_model_id=7, alert_threshold=0.33)
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(get_active_config=lambda db: exp))
     res = settings_service.get_active_config(None)
-    assert res is exp
+    assert res is exp  # devuelve la configuración activa mockeada
 
 
 def test_get_active_config_when_missing_returns_controlled_result(monkeypatch):
     monkeypatch.setattr(settings_service, "model_config_repository", types.SimpleNamespace(get_active_config=lambda db: None))
     res = settings_service.get_active_config(None)
-    assert res is None
+    assert res is None  # cuando no hay config, devuelve None

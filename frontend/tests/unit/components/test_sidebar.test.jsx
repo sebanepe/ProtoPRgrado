@@ -12,6 +12,7 @@ describe('Sidebar component', () => {
       </MemoryRouter>
     )
     // Sidebar contains a link to Dashboard (or 'Panel' in Spanish) by default
+    // verifica que exista el enlace al panel/dashboard
     expect(screen.getByText(/Dashboard|Panel/i)).toBeTruthy()
   })
 })

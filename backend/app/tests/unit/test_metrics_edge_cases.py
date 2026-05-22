@@ -10,21 +10,21 @@ def test_precision_with_known_values():
     y_true = np.array([0, 1, 1, 0])
     y_pred = np.array([0, 1, 0, 0])
     metrics = compute_metrics(y_true, y_pred)
-    assert round(metrics["precision"], 3) == 1.0
+    assert round(metrics["precision"], 3) == 1.0  # precision conocida para este ejemplo
 
 
 def test_recall_with_known_values():
     y_true = np.array([0, 1, 1, 0])
     y_pred = np.array([0, 1, 0, 0])
     metrics = compute_metrics(y_true, y_pred)
-    assert round(metrics["recall"], 3) == 0.5
+    assert round(metrics["recall"], 3) == 0.5  # recall esperado: 1 de 2 verdaderos positivos
 
 
 def test_f1_with_known_values():
     y_true = np.array([0, 1, 1, 0])
     y_pred = np.array([0, 1, 0, 0])
     metrics = compute_metrics(y_true, y_pred)
-    assert "f1_score" in metrics
+    assert "f1_score" in metrics  # F1 debe estar presente en el diccionario de métricas
 
 
 def test_metrics_handle_zero_division():
@@ -32,21 +32,21 @@ def test_metrics_handle_zero_division():
     y_true = np.array([0, 0, 0])
     y_pred = np.array([0, 0, 0])
     metrics = compute_metrics(y_true, y_pred)
-    assert metrics["precision"] == 0.0
+    assert metrics["precision"] == 0.0  # sin predicciones positivas, precisión manejada como 0
 
 
 def test_roc_auc_with_valid_probabilities():
     y_true = np.array([0, 1, 1, 0])
     y_score = np.array([0.1, 0.9, 0.4, 0.2])
     metrics = compute_metrics(y_true, y_pred=np.array([0, 1, 0, 0]), y_score=y_score)
-    assert metrics["roc_auc"] is not None
+    assert metrics["roc_auc"] is not None  # ROC AUC calculable con probabilidades válidas
 
 
 def test_roc_auc_with_single_class_returns_none_or_safe_value():
     y_true = np.array([0, 0, 0])
     y_pred = np.array([0, 0, 0])
     metrics = compute_metrics(y_true, y_pred)
-    assert metrics.get("roc_auc") is None or isinstance(metrics.get("roc_auc"), float)
+    assert metrics.get("roc_auc") is None or isinstance(metrics.get("roc_auc"), float)  # con una sola clase, ROC puede ser None
 
 
 def test_confusion_matrix_values():
@@ -56,9 +56,9 @@ def test_confusion_matrix_values():
     cm = ext.get("confusion_matrix")
     # Expect TN=2, FP=0, FN=1, TP=1 for this case
     assert cm["tn"] == 2
-    assert cm["fp"] == 0
-    assert cm["fn"] == 1
-    assert cm["tp"] == 1
+    assert cm["fp"] == 0  # FP esperado = 0
+    assert cm["fn"] == 1  # FN esperado = 1
+    assert cm["tp"] == 1  # TP esperado = 1
 
 
 def test_metrics_output_contains_expected_keys():
@@ -66,4 +66,4 @@ def test_metrics_output_contains_expected_keys():
     y_pred = np.array([0, 1, 0, 0])
     ext = compute_metrics_extended(y_true, y_pred)
     for k in ["accuracy", "precision", "recall", "f1_score", "roc_auc", "confusion_matrix"]:
-        assert k in ext
+        assert k in ext  # la salida extendida debe contener todas las claves esperadas

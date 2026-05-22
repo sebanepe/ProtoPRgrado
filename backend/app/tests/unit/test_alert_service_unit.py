@@ -42,6 +42,7 @@ def test_alert_not_created_when_score_below_threshold(monkeypatch):
     res = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "tx1", "amount": 1.0}])
     assert res == []
     assert called["created"] is False
+    # Si la puntuación está por debajo del umbral, no debe crearse alerta
 
 
 def test_alert_created_when_score_equals_threshold(monkeypatch):
@@ -59,8 +60,8 @@ def test_alert_created_when_score_equals_threshold(monkeypatch):
     monkeypatch.setattr(alert_service.alert_repository, "create_alert", fake_create_alert)
     out = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "123", "amount": 2.0}])
     assert len(out) == 1
-    assert created_args["risk_score"] == 0.5
-    assert created_args["status"] == "NEW"
+    assert created_args["risk_score"] == 0.5  # la puntuación usada debe ser la esperada (0.5)
+    assert created_args["status"] == "NEW"  # el estado por defecto para nuevas alertas es NEW
 
 
 def test_alert_created_when_score_above_threshold(monkeypatch):
@@ -75,7 +76,7 @@ def test_alert_created_when_score_above_threshold(monkeypatch):
     monkeypatch.setattr(alert_service.alert_repository, "create_alert", fake_create_alert)
     res = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "abc", "amount": 9.0}])
     assert len(res) == 1
-    assert res[0]["risk_level"] in ("LOW", "MEDIUM", "HIGH")
+    assert res[0]["risk_level"] in ("LOW", "MEDIUM", "HIGH")  # nivel de riesgo debe ser uno de los permitidos
 
 
 def test_alert_uses_threshold_from_model_config(monkeypatch):
@@ -90,12 +91,12 @@ def test_alert_uses_threshold_from_model_config(monkeypatch):
     monkeypatch.setattr(alert_service.alert_repository, "create_alert", lambda db, **kwargs: created.append(kwargs) or DummyAlert(id=1, transaction_id=0, risk_score=kwargs.get("risk_score", 0.0)))
 
     res = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "1", "amount": 1.0}])
-    assert res == []
+    assert res == []  # con umbral alto no se generan alertas
 
     # now lower threshold and expect creation
     monkeypatch.setattr(alert_service.settings_service, "get_active_threshold", lambda db: 0.5)
     res2 = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "1", "amount": 1.0}])
-    assert len(res2) == 1
+    assert len(res2) == 1  # bajando el umbral, ahora debe generarse una alerta
 
 
 def test_alert_uses_default_threshold_when_config_missing_if_supported(monkeypatch, monkeypatching=None):
@@ -115,7 +116,7 @@ def test_alert_uses_default_threshold_when_config_missing_if_supported(monkeypat
     monkeypatch.setattr(alert_service.alert_repository, "create_alert", fake_create_alert)
     res = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "x", "amount": 2.0}])
     # since score equals threshold, alert should be created
-    assert called.get('ok', False) is True
+    assert called.get('ok', False) is True  # igualdad con el umbral debe crear alerta según la política
 
 
 def test_alert_payload_contains_required_fields_and_status_default_is_new(monkeypatch):
@@ -132,8 +133,8 @@ def test_alert_payload_contains_required_fields_and_status_default_is_new(monkey
 
     monkeypatch.setattr(alert_service.alert_repository, "create_alert", fake_create_alert)
     out = alert_service.generate_alerts_from_batch(None, [{"transaction_id": "42", "amount": 10.0}])
-    assert "transaction_id" in recorded
-    assert "risk_score" in recorded
-    assert "risk_level" in recorded
-    assert "model_name" in recorded
-    assert recorded.get("status") == "NEW"
+    assert "transaction_id" in recorded  # el payload debe contener transaction_id
+    assert "risk_score" in recorded  # el payload debe contener la puntuación de riesgo
+    assert "risk_level" in recorded  # el payload debe contener el nivel de riesgo
+    assert "model_name" in recorded  # el payload debe indicar el modelo usado
+    assert recorded.get("status") == "NEW"  # el estado por defecto debe ser NEW

@@ -17,6 +17,7 @@ def test_clean_data_does_not_mutate_original_dataframe():
     _processed, _summary = preprocess_dataframe(df, apply_smote=False)
     # original should remain identical to original_copy
     pd.testing.assert_frame_equal(df, original_copy)
+    # la función no debe mutar el dataframe original
 
 
 def test_clean_data_removes_duplicate_rows():
@@ -25,7 +26,7 @@ def test_clean_data_removes_duplicate_rows():
         {"transaction_id": "t1", "amount": 10, "transaction_datetime": "2021-01-01"},
     ])
     processed, summary = preprocess_dataframe(df, apply_smote=False)
-    assert summary["after_clean"] == 1
+    assert summary["after_clean"] == 1  # duplicados deben eliminarse dejando 1 fila
 
 
 def test_clean_data_removes_duplicate_transaction_id_if_supported():
@@ -35,8 +36,8 @@ def test_clean_data_removes_duplicate_transaction_id_if_supported():
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
     # only one transaction_id should remain
-    assert processed.index.size >= 1
-    assert processed["is_fraud"].shape[0] == 1 or processed.index.nlevels >= 0
+    assert processed.index.size >= 1  # debe quedar al menos una fila con ese transaction_id
+    assert processed["is_fraud"].shape[0] == 1 or processed.index.nlevels >= 0  # confirma que la estructura es válida
 
 
 def test_clean_data_handles_null_amount():
@@ -45,7 +46,7 @@ def test_clean_data_handles_null_amount():
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
     # amount_scaled should exist even if original amount was null
-    assert "amount_scaled" in processed.columns
+    assert "amount_scaled" in processed.columns  # columna escalada debe ser creada aun con None
 
 
 def test_clean_data_handles_null_transaction_id():
@@ -54,14 +55,14 @@ def test_clean_data_handles_null_transaction_id():
     ])
     processed, summary = preprocess_dataframe(df, apply_smote=False)
     # rows without valid transaction_datetime are dropped; transaction_id None should be handled
-    assert isinstance(processed, pd.DataFrame)
+    assert isinstance(processed, pd.DataFrame)  # debe devolver un DataFrame incluso con transaction_id nulo
 
 
 def test_clean_data_handles_empty_dataframe():
     df = pd.DataFrame([])
     processed, summary = preprocess_dataframe(df, apply_smote=False)
-    assert processed.empty
-    assert summary.get("after", 0) == 0
+    assert processed.empty  # dataframe vacío debe permanecer vacío
+    assert summary.get("after", 0) == 0  # resumen debe indicar 0 filas después
 
 
 def test_amount_string_is_converted_to_numeric():
@@ -69,7 +70,7 @@ def test_amount_string_is_converted_to_numeric():
         {"transaction_id": "t1", "amount": "123.45", "transaction_datetime": "2021-01-01"},
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
-    assert "amount_scaled" in processed.columns
+    assert "amount_scaled" in processed.columns  # cadenas numéricas convertidas y escaladas
 
 
 def test_invalid_amount_string_is_handled():
@@ -78,7 +79,7 @@ def test_invalid_amount_string_is_handled():
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
     # should not raise and should produce amount_scaled column
-    assert "amount_scaled" in processed.columns
+    assert "amount_scaled" in processed.columns  # strings inválidas handled y columna existe
 
 
 def test_encode_features_handles_missing_optional_categorical_columns():
@@ -87,7 +88,7 @@ def test_encode_features_handles_missing_optional_categorical_columns():
         {"transaction_id": "t1", "amount": 10, "transaction_datetime": "2021-01-01"},
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
-    assert isinstance(processed, pd.DataFrame)
+    assert isinstance(processed, pd.DataFrame)  # procesamiento no debe fallar por columnas categóricas faltantes
 
 
 def test_encode_features_preserves_is_fraud_column():
@@ -95,7 +96,7 @@ def test_encode_features_preserves_is_fraud_column():
         {"transaction_id": "t1", "amount": 10, "transaction_datetime": "2021-01-01", "is_fraud": 1},
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
-    assert "is_fraud" in processed.columns
+    assert "is_fraud" in processed.columns  # la etiqueta de auditoría debe preservarse
 
 
 def test_scale_features_handles_constant_amounts():
@@ -105,8 +106,8 @@ def test_scale_features_handles_constant_amounts():
     ])
     processed, _ = preprocess_dataframe(df, apply_smote=False)
     # amount_scaled should exist and be finite
-    assert "amount_scaled" in processed.columns
-    assert processed["amount_scaled"].notna().all()
+    assert "amount_scaled" in processed.columns  # escala aplicada incluso con valores constantes
+    assert processed["amount_scaled"].notna().all()  # valores escalados no deben ser NaN
 
 
 def test_preprocess_dataset_returns_dataframe():
@@ -114,5 +115,5 @@ def test_preprocess_dataset_returns_dataframe():
         {"transaction_id": "t1", "amount": 1, "transaction_datetime": "2021-01-01"},
     ])
     processed, summary = preprocess_dataframe(df, apply_smote=False)
-    assert isinstance(processed, pd.DataFrame)
-    assert "columns_transformed" in summary
+    assert isinstance(processed, pd.DataFrame)  # devuelve DataFrame final
+    assert "columns_transformed" in summary  # resumen incluye columnas transformadas

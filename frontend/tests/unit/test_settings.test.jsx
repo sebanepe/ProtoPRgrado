@@ -27,9 +27,10 @@ describe('Settings page', () => {
   it('renders and populates form from API', async () => {
     render(<Settings />)
     await waitFor(() => expect(getModelConfig).toHaveBeenCalled())
-    // check that model select contains option m2
+    // verifica que la opción m2 esté presente en el select de modelos
     expect(screen.getByText(/m2/i)).toBeTruthy()
     const inputThreshold = screen.getByDisplayValue('0.6')
+    // el umbral mostrado debe corresponder al valor retornado por la API
     expect(Number(inputThreshold.value)).toBeCloseTo(0.6)
   })
 })

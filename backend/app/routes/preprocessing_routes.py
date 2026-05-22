@@ -44,7 +44,7 @@ def list_runs(db: Session = Depends(get_db), _auth=Depends(require_permission("p
 
 
 @router.get("/runs/{run_id}/preview")
-def preview_run(run_id: int, db: Session = Depends(get_db)):
+def preview_run(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
     r = db.query(PreprocessingRun).filter(PreprocessingRun.id == run_id).first()
     if not r:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")

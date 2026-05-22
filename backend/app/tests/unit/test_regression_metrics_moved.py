@@ -21,8 +21,8 @@ def test_regression_metrics_against_baseline_moved():
         baseline = json.load(fh)
 
     tol = 1e-8
-    assert abs(metrics.get("precision") - baseline["precision"]) < tol
-    assert abs(metrics.get("recall") - baseline["recall"]) < tol
-    assert abs(metrics.get("f1_score") - baseline["f1_score"]) < tol
+    assert abs(metrics.get("precision") - baseline["precision"]) < tol  # precision igual al baseline
+    assert abs(metrics.get("recall") - baseline["recall"]) < tol  # recall igual al baseline
+    assert abs(metrics.get("f1_score") - baseline["f1_score"]) < tol  # f1 igual al baseline
     if metrics.get("roc_auc") is not None:
-        assert abs(metrics.get("roc_auc") - baseline["roc_auc"]) < tol
+        assert abs(metrics.get("roc_auc") - baseline["roc_auc"]) < tol  # roc_auc coincide con baseline cuando está presente

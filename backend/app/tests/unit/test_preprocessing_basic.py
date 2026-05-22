@@ -1,7 +1,10 @@
 import pandas as pd
 from backend.app.ml.preprocessing import preprocess_dataframe
 
-"""Unit test extracted from test_preprocessing.py to `unit` folder."""
+"""Pruebas unitarias básicas de preprocesamiento.
+
+Verifican manejo de valores faltantes, codificación y escalado simple.
+"""
 
 
 def test_preprocess_basic_missing_and_scaling_extracted():
@@ -28,7 +31,7 @@ def test_preprocess_basic_missing_and_scaling_extracted():
 
     processed, summary = preprocess_dataframe(df, apply_smote=False)
 
-    assert summary["after_clean"] == 2
-    assert "amount_scaled" in processed.columns
-    assert "is_fraud" in processed.columns
-    assert len(summary["columns_transformed"]) > 0
+    assert summary["after_clean"] == 2  # confirma que ambas filas sobrevivieron al limpiado
+    assert "amount_scaled" in processed.columns  # verifica que se creó columna normalizada
+    assert "is_fraud" in processed.columns  # la etiqueta de fraude debe preservarse para auditoría
+    assert len(summary["columns_transformed"]) > 0  # se transformaron columnas

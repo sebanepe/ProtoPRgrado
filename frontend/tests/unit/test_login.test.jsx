@@ -18,6 +18,7 @@ describe('Login page', () => {
     fireEvent.change(pass, { target: { value: 'secret' } })
     fireEvent.click(btn)
 
+    // al enviar, se espera redirección al dashboard
     await waitFor(() => expect(window.location.href).toContain('/dashboard'))
   })
 })

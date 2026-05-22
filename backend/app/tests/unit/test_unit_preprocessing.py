@@ -1,7 +1,11 @@
 import pandas as pd
 from backend.app.ml.preprocessing import preprocess_dataframe
 
-"""Unit test for preprocessing logic that doesn't require DB."""
+"""Tests unitarios para preprocesamiento independiente de la base de datos.
+
+Comprueba manejo de nulos, encoding y escalado.
+"""
+
 
 def test_preprocess_handles_missing_and_encoding():
     df = pd.DataFrame([
@@ -9,6 +13,6 @@ def test_preprocess_handles_missing_and_encoding():
         {'transaction_id':'b','amount': None, 'transaction_type': None, 'channel': None, 'location':None, 'transaction_datetime':'2021-01-02', 'is_fraud':1},
     ])
     processed, summary = preprocess_dataframe(df, apply_smote=False)
-    assert 'amount_scaled' in processed.columns
-    assert 'is_fraud' in processed.columns
-    assert summary['after_clean'] == 2
+    assert 'amount_scaled' in processed.columns  # verifica creación de columna escalada
+    assert 'is_fraud' in processed.columns  # verifica que la etiqueta de fraude esté presente
+    assert summary['after_clean'] == 2  # ambas filas deben permanecer después de la limpieza

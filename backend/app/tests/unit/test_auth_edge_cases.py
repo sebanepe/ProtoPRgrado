@@ -19,19 +19,19 @@ class DummyUser:
 def test_password_hash_is_not_plain_text():
     pw = "MySecret"
     hashed = auth_service.hash_password(pw)
-    assert hashed != pw
+    assert hashed != pw  # el hash no debe ser igual al texto plano
 
 
 def test_verify_password_success():
     pw = "Password123!"
     hashed = auth_service.hash_password(pw)
-    assert auth_service.verify_password(pw, hashed)
+    assert auth_service.verify_password(pw, hashed)  # verificación debe ser exitosa con la contraseña correcta
 
 
 def test_verify_password_failure():
     pw = "Password123!"
     hashed = auth_service.hash_password(pw)
-    assert not auth_service.verify_password("wrongpw", hashed)
+    assert not auth_service.verify_password("wrongpw", hashed)  # contraseña incorrecta no debe verificar
 
 
 def test_empty_password_is_rejected_if_supported(monkeypatch):
@@ -92,4 +92,4 @@ def test_inactive_user_cannot_login_if_supported(monkeypatch):
 
     monkeypatch.setattr(auth_service, "user_repository", types.SimpleNamespace(get_user_by_email=fake_get_by_email))
     res = auth_service.authenticate_user(None, "u@x.com", "pw")
-    assert res is None
+    assert res is None  # usuario inactivo no puede autenticarse
