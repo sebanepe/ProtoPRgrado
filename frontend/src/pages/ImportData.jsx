@@ -14,13 +14,13 @@ export default function ImportData(){
   }
   return (
     <div>
-      <div className="header"><h2>Import Data</h2></div>
+      <div className="header"><h2>Importar datos</h2></div>
       <div className="card">
         <form onSubmit={onSubmit}>
           <div className="form-row">
             <input type="file" onChange={e=>setFile(e.target.files[0])} />
           </div>
-          <div style={{textAlign:'right'}}><button className="button">Upload</button></div>
+          <div style={{textAlign:'right'}}><button className="button">Subir</button></div>
         </form>
         {msg && <div style={{marginTop:12}} className="card">{msg}</div>}
       </div>

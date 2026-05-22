@@ -12,8 +12,8 @@ export default function Preprocessing(){
   }
   return (
     <div>
-      <div className="header"><h2>Preprocessing</h2>
-        <div><button className="button" onClick={run}>Run Preprocessing</button></div>
+      <div className="header"><h2>Preprocesamiento</h2>
+        <div><button className="button" onClick={run}>Ejecutar preprocesamiento</button></div>
       </div>
       <div className="card">{msg || 'Presiona para ejecutar SMOTE y transformar datos'}</div>
     </div>

@@ -26,26 +26,26 @@ export default function Settings(){
 
   return (
     <div>
-      <div className="header"><h2>Settings</h2></div>
+      <div className="header"><h2>Configuración</h2></div>
       <div className="card">
-        <h3>Model Configuration</h3>
+        <h3>Configuración del modelo</h3>
         <div style={{marginBottom:10}}>
-          <label>Active Model: </label>
+          <label>Modelo activo: </label>
           <select value={form.active_model_id ?? ''} onChange={e=> setForm({...form, active_model_id: e.target.value ? Number(e.target.value) : null})}>
-            <option value="">-- none --</option>
+            <option value="">-- ninguno --</option>
             {models.map(m=> <option key={m.id} value={m.id}>{m.model_name} {m.version?`(${m.version})`:''}</option>)}
           </select>
         </div>
         <div style={{marginBottom:10}}>
-          <label>Alert Threshold: </label>
+          <label>Umbral de alerta: </label>
           <input type="number" step="0.01" min="0" max="1" value={form.alert_threshold} onChange={e=> setForm({...form, alert_threshold: Number(e.target.value)})} />
         </div>
         <div style={{marginBottom:10}}>
-          <label>Updated By: </label>
+          <label>Actualizado por: </label>
           <input value={form.updated_by} onChange={e=> setForm({...form, updated_by: e.target.value})} />
         </div>
         <div>
-          <button className="button" onClick={save}>Save</button>
+          <button className="button" onClick={save}>Guardar</button>
         </div>
       </div>
     </div>

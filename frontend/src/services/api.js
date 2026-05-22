@@ -20,6 +20,33 @@ if (api.interceptors && api.interceptors.request && typeof api.interceptors.requ
 }
 
 export async function health(){ return api.get('/health').then(r=>r.data).catch(()=>null) }
+export async function getDashboardSummary(){
+  // Try the real endpoint; if missing or network error, return a safe mock for UI
+  try{
+    const res = await api.get('/dashboard/summary')
+    return res.data
+  }catch(e){
+    // If server responded with 4xx/5xx, bubble up to UI
+    if (e && e.response) throw e
+    // fallback mock (used in tests/dev when backend missing)
+    const mock = {
+      transactions: 12543,
+      alerts: 12,
+      risk: 0.32,
+      model: 'rf-v1',
+      alertTrend: [
+        {date:'2026-05-15', count:2}, {date:'2026-05-16', count:3}, {date:'2026-05-17', count:1},
+        {date:'2026-05-18', count:4}, {date:'2026-05-19', count:2}
+      ],
+      fraudRatio: {fraud:18, normal:82},
+      recentAlerts: [
+        {alert_id:101, transaction_id: 'tx_001', score:0.87, channel:'POS', amount:123.45, status:'New', date:'2026-05-19'},
+        {alert_id:102, transaction_id: 'tx_002', score:0.65, channel:'Web', amount:543.21, status:'Review', date:'2026-05-19'}
+      ]
+    }
+    return mock
+  }
+}
 export async function login(credentials){
   // try real endpoint, fallback to simulated login
   try{

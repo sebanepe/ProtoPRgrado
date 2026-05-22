@@ -1,4 +1,4 @@
-# fraud-detection-system
+# sistema-deteccion-fraude
 
 Proyecto prototipo académico para detección de fraude bancario utilizando machine learning.
 

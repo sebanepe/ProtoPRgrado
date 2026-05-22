@@ -7,14 +7,14 @@ export default function Alerts(){
   useEffect(()=>{ listAlerts().then(a=> setAlerts(a||[])).catch(()=>{}) },[])
   const columns = [
     {key:'id', title:'ID'},
-    {key:'transaction_id', title:'Transaction'},
-    {key:'risk_score', title:'Risk'},
-    {key:'risk_level', title:'Level'},
-    {key:'status', title:'Status'}
+    {key:'transaction_id', title:'Transacción'},
+    {key:'risk_score', title:'Riesgo'},
+    {key:'risk_level', title:'Nivel'},
+    {key:'status', title:'Estado'}
   ]
   return (
     <div>
-      <div className="header"><h2>Alerts</h2></div>
+      <div className="header"><h2>Alertas</h2></div>
       <Table columns={columns} data={alerts} />
     </div>
   )

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes
+from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes
 from .config import settings
 
 
@@ -36,6 +36,7 @@ app.include_router(model_routes.router)
 app.include_router(model_evaluation_routes.router)
 app.include_router(alert_routes.router)
 app.include_router(settings_routes.router)
+app.include_router(dashboard_routes.router)
 
 
 @app.get("/health", tags=["health"])
