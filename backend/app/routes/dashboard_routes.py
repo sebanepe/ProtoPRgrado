@@ -64,4 +64,9 @@ def dashboard_summary(db: Session = Depends(get_db)):
         "recentAlerts": recent_list,
         # Backwards-compat keys expected by frontend mock
         "recent_alerts": recent_list,
+        # Backwards-compatible keys expected by integration tests
+        "total_transactions": int(tx_count),
+        "active_alerts": int(alerts_count),
+        "average_risk": float(avg_risk) if avg_risk is not None else 0.0,
+        "active_model": active_model or "--",
     }
