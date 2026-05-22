@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 def insert_transactions(db: Session, records: List[Dict]):
-    objs = []
+    inserted = 0
     for r in records:
         t = Transaction(
             transaction_id=r.get("transaction_id"),
@@ -18,11 +18,12 @@ def insert_transactions(db: Session, records: List[Dict]):
             transaction_datetime=r.get("transaction_datetime"),
             is_fraud=r.get("is_fraud", False),
         )
-        objs.append(t)
-    try:
-        db.add_all(objs)
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        raise
-    return len(objs)
+        try:
+            db.add(t)
+            db.commit()
+            inserted += 1
+        except SQLAlchemyError:
+            db.rollback()
+            # skip problematic record (likely duplicate key) and continue
+            continue
+    return inserted
