@@ -59,7 +59,26 @@ def preview_dataset(dataset_id: int, rows: int = 10, db: Session = Depends(get_d
         df = pd.read_csv(d.file_path, nrows=rows)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error reading CSV: {e}")
-    return {"dataset_id": d.id, "rows": df.to_dict(orient="records"), "columns": list(df.columns)}
+    # sanitize values: replace inf/-inf and NaN with None for JSON serialization
+    try:
+        import math
+        records = df.to_dict(orient="records")
+        sanitized = []
+        for r in records:
+            nr = {}
+            for k, v in r.items():
+                try:
+                    if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
+                        nr[k] = None
+                    else:
+                        nr[k] = v
+                except Exception:
+                    nr[k] = None
+            sanitized.append(nr)
+    except Exception:
+        sanitized = df.fillna('').astype(str).to_dict(orient='records')
+
+    return {"dataset_id": d.id, "rows": sanitized, "columns": list(df.columns)}
 
 
 @router.delete("/{dataset_id}")
