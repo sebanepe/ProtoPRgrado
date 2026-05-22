@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import settings_service
+from backend.app.services.permission_service import require_permission
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -15,7 +16,7 @@ def get_model_config(db: Session = Depends(get_db)):
 
 
 @router.post("/model-config")
-def post_model_config(payload: dict, db: Session = Depends(get_db)):
+def post_model_config(payload: dict, db: Session = Depends(get_db), _auth=Depends(require_permission("configure_model"))):
     # payload may contain: active_model_id, alert_threshold, updated_by
     active_model_id = payload.get("active_model_id")
     alert_threshold = payload.get("alert_threshold")

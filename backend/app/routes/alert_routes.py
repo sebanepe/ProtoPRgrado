@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import alert_service
 from typing import List, Optional
+from backend.app.services.permission_service import require_permission
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
 @router.post("/generate")
-def generate_alerts(transactions: List[dict], db: Session = Depends(get_db)):
+def generate_alerts(transactions: List[dict], db: Session = Depends(get_db), _auth=Depends(require_permission("scoring"))):
     try:
         created = alert_service.generate_alerts_from_batch(db, transactions)
     except ValueError as e:
@@ -26,6 +27,7 @@ def list_alerts(
     risk_level: Optional[str] = Query(None),
     channel: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    _auth=Depends(require_permission("view_alerts")),
 ):
     filters = {"status": status, "start_date": start_date, "end_date": end_date, "risk_level": risk_level, "channel": channel}
     res = alert_service.list_alerts(db, filters)
@@ -33,7 +35,7 @@ def list_alerts(
 
 
 @router.get("/{id}")
-def get_alert(id: int, db: Session = Depends(get_db)):
+def get_alert(id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("alert_detail"))):
     a = alert_service.get_alert(db, id)
     if not a:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -41,7 +43,7 @@ def get_alert(id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{id}/status")
-def patch_status(id: int, status: str, db: Session = Depends(get_db)):
+def patch_status(id: int, status: str, db: Session = Depends(get_db), _auth=Depends(require_permission("change_alert_state"))):
     try:
         a = alert_service.patch_alert_status(db, id, status)
     except ValueError as e:

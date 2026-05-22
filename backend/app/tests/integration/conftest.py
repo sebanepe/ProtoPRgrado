@@ -44,7 +44,21 @@ def _override_get_db():
 def test_client():
     # override dependency
     app.dependency_overrides[get_db] = _override_get_db
+    # create a default admin user in test DB and set header for requests
+    db = TestingSessionLocal()
+    try:
+        from backend.app.services.auth_service import hash_password
+        from backend.app.repositories import user_repository
+
+        admin_email = "sebanpb@gmail.com"
+        if not user_repository.get_user_by_email(db, admin_email):
+            admin_pw = hash_password("Mariokart8$")
+            user_repository.create_user(db, full_name="Test Admin", email=admin_email, password_hash=admin_pw, role="ADMIN")
+    finally:
+        db.close()
+
     with TestClient(app) as c:
+        c.headers.update({"X-User-Email": "sebanpb@gmail.com"})
         yield c
     app.dependency_overrides.clear()
 

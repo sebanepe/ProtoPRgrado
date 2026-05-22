@@ -38,7 +38,21 @@ def _override_get_db():
 @pytest.fixture()
 def client():
     app.dependency_overrides[get_db] = _override_get_db
+    # create default admin in test DB and set header
+    db = TestingSessionLocal()
+    try:
+        from backend.app.services.auth_service import hash_password
+        from backend.app.repositories import user_repository
+
+        admin_email = "reg.admin@example.com"
+        if not user_repository.get_user_by_email(db, admin_email):
+            admin_pw = hash_password("Admin123!")
+            user_repository.create_user(db, full_name="Regression Admin", email=admin_email, password_hash=admin_pw, role="ADMIN")
+    finally:
+        db.close()
+
     with TestClient(app) as c:
+        c.headers.update({"X-User-Email": "reg.admin@example.com"})
         yield c
     app.dependency_overrides.clear()
 

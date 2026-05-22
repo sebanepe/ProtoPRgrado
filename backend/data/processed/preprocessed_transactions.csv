@@ -1,0 +1,2 @@
+transaction_type_purchase,channel_web,location_loc1,amount_scaled,is_fraud
+True,True,True,0.0,0

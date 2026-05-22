@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import preprocessing_service
+from backend.app.services.permission_service import require_permission
 
 router = APIRouter(prefix="/preprocessing", tags=["preprocessing"])
 
 
 @router.post("/run")
-def run_preprocessing(db: Session = Depends(get_db)):
+def run_preprocessing(db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
     try:
         summary = preprocessing_service.run_preprocessing(db)
     except Exception as e:

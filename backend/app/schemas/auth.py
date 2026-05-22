@@ -22,6 +22,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    token: Optional[str] = None
 
     class Config:
         orm_mode = True

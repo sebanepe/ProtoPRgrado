@@ -41,3 +41,30 @@ app.include_router(settings_routes.router)
 def health():
     """Endpoint de salud del sistema."""
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def ensure_default_admin():
+    """Create a default admin user if no users exist. Credentials can be overridden via env vars."""
+    import os
+    from backend.app.database import SessionLocal
+    from backend.app.models.models import User
+    from backend.app.services.auth_service import hash_password
+    from backend.app.repositories import user_repository
+
+    admin_email = os.environ.get("DEFAULT_ADMIN_EMAIL", "admin@localhost")
+    admin_password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "Admin123!")
+
+    # Skip creating default admin when running tests
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("PYTEST_RUNNING"):
+        return
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).first()
+        if not existing:
+            hashed = hash_password(admin_password)
+            user_repository.create_user(db, full_name="Administrador del Sistema", email=admin_email, password_hash=hashed, role="ADMIN")
+            print(f"Created default admin: {admin_email} (password from DEFAULT_ADMIN_PASSWORD or 'Admin123!')")
+    finally:
+        db.close()

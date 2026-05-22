@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import evaluation_service
 from fastapi.responses import FileResponse
+from backend.app.services.permission_service import require_permission
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
 @router.get("/comparison")
-def comparison(input_path: str = "data/processed/preprocessed_transactions.csv", db: Session = Depends(get_db)):
+def comparison(input_path: str = "data/processed/preprocessed_transactions.csv", db: Session = Depends(get_db), _auth=Depends(require_permission("evaluate"))):
     try:
         results = evaluation_service.compare_models(db, input_path=input_path)
     except Exception as e:
@@ -17,7 +18,7 @@ def comparison(input_path: str = "data/processed/preprocessed_transactions.csv",
 
 
 @router.get("/export-results")
-def export_results(input_path: str = "data/processed/preprocessed_transactions.csv", db: Session = Depends(get_db)):
+def export_results(input_path: str = "data/processed/preprocessed_transactions.csv", db: Session = Depends(get_db), _auth=Depends(require_permission("evaluate"))):
     try:
         export_path = "data/processed/model_comparison.csv"
         evaluation_service.compare_models(db, input_path=input_path, export_path=export_path)

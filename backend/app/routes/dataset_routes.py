@@ -2,12 +2,13 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import dataset_service
+from backend.app.services.permission_service import require_permission
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
 @router.post("/import")
-def import_dataset(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def import_dataset(file: UploadFile = File(...), db: Session = Depends(get_db), _auth=Depends(require_permission("import_data"))):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported")
     try:
