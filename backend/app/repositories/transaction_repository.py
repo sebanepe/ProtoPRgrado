@@ -4,7 +4,7 @@ from typing import List, Dict
 from sqlalchemy.exc import SQLAlchemyError
 
 
-def insert_transactions(db: Session, records: List[Dict]):
+def insert_transactions(db: Session, records: List[Dict], dataset_id: int | None = None):
     inserted = 0
     for r in records:
         t = Transaction(
@@ -17,6 +17,7 @@ def insert_transactions(db: Session, records: List[Dict]):
             customer_hash=r.get("customer_hash"),
             transaction_datetime=r.get("transaction_datetime"),
             is_fraud=r.get("is_fraud", False),
+            dataset_id=dataset_id,
         )
         try:
             db.add(t)

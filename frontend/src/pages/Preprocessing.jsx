@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react'
-import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun } from '../services/api'
+import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun } from '../services/api'
 
 export default function Preprocessing(){
   const [msg,setMsg] = useState('')
@@ -16,6 +16,16 @@ export default function Preprocessing(){
       setMsg('Listo: '+ JSON.stringify(res))
       await loadRuns()
     }catch(e){ setMsg('Error: '+ (e?.message||e)) }
+  }
+
+  const handleRunDataset = async (datasetId) => {
+    setMsg('Ejecutando preprocesamiento para dataset ' + datasetId + '...')
+    try{
+      // call backend with selected dataset id so processing is scoped
+      const res = await runPreprocessing(datasetId)
+      setMsg('Listo: '+ JSON.stringify(res))
+      await loadRuns()
+    }catch(e){ setMsg('Error: '+ (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
   const load = async ()=>{
@@ -62,15 +72,59 @@ export default function Preprocessing(){
     setRunPreview({ loading: true })
     try{
       const p = await previewPreprocessingRun(id)
-      setRunPreview({ loading: false, data: p })
+      // fetch inferred stages for UI; if that fails, try to infer from preview 'after' rows
+      let stages = null
+      try{
+        const s = await getPreprocessingRunStages(id)
+        stages = s && s.stages ? s.stages : null
+      }catch(_){ stages = null }
+
+      if(!stages && p && p.after && Array.isArray(p.after) && p.after.length>0){
+        // infer basic stages from the previewed processed rows
+        const sample = p.after[0]
+        const hasAmountScaled = Object.prototype.hasOwnProperty.call(sample, 'amount_scaled')
+        const dummy_like = Object.keys(sample).some(c => c.includes('_') && !['is_fraud','fraud_label_reason'].includes(c))
+        stages = {
+          limpieza: 'COMPLETED',
+          normalizacion: hasAmountScaled ? 'COMPLETED' : 'COMPLETED',
+          codificacion: dummy_like ? 'COMPLETED' : 'PENDING',
+          smote: 'NOT_APPLIED',
+        }
+      }
+
+      setRunPreview({ loading: false, data: p, stages })
     }catch(e){ setRunPreview({ loading: false, error: e?.response?.data?.detail || e?.message || String(e) }) }
+  }
+
+  const handleDownloadRun = async (id) => {
+    try{
+      const blob = await downloadPreprocessingRun(id)
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `preprocessed_run_${id}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    }catch(e){
+      alert('Error descargando el CSV: ' + (e?.response?.data?.detail || e?.message || String(e)))
+    }
+  }
+
+  const handleDeleteRun = async (id)=>{
+    if(!window.confirm('¿Borrar run #' + id + '? Esta acción eliminará los archivos procesados.')) return
+    try{
+      await deletePreprocessingRun(id)
+      await loadRuns()
+      setMsg('Run ' + id + ' borrado')
+    }catch(e){ setMsg('Error borrando run: ' + (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
   return (
     <div>
       <div className="header"><h2>Preprocesamiento</h2>
         <div style={{display:'flex',gap:8}}>
-          <button className="button" onClick={run}>Ejecutar preprocesamiento</button>
           <button className="button" onClick={load}>Refrescar datasets</button>
         </div>
       </div>
@@ -93,6 +147,7 @@ export default function Preprocessing(){
                   <td>{d.invalid_records}</td>
                   <td style={{display:'flex',gap:8}}>
                     <button className="button" onClick={()=>handlePreview(d.id)}>Previsualizar</button>
+                    <button className="button" onClick={()=>handleRunDataset(d.id)}>Procesar</button>
                     <button className="button danger" onClick={()=>handleDelete(d.id)}>Borrar</button>
                   </td>
                 </tr>
@@ -115,7 +170,11 @@ export default function Preprocessing(){
                       <td>{rr.total_records}</td>
                       <td>{rr.processed_records}</td>
                       <td>{rr.removed_records}</td>
-                      <td><button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button></td>
+                      <td style={{display:'flex',gap:8}}>
+                        <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
+                        <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
+                        <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -170,6 +229,20 @@ export default function Preprocessing(){
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div style={{width:240}}>
+                <h5>Etapas</h5>
+                {!runPreview.stages && <div style={{fontSize:12,color:'#666'}}>No disponible</div>}
+                {runPreview.stages && (
+                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    {Object.entries(runPreview.stages).map(([k,v])=> (
+                      <div key={k} style={{display:'flex',justifyContent:'space-between'}}>
+                        <div style={{textTransform:'capitalize'}}>{k.replace('_',' ')}</div>
+                        <div style={{fontWeight:600}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

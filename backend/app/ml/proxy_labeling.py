@@ -54,7 +54,23 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
     df = df.copy()
     # Ensure datetime
     if "transaction_datetime" in df.columns:
-        df["transaction_datetime"] = pd.to_datetime(df["transaction_datetime"], errors="coerce")
+        try:
+            ts = pd.to_datetime(df["transaction_datetime"], errors="coerce", utc=True)
+            if hasattr(ts.dt, "tz"):
+                df["transaction_datetime"] = ts.dt.tz_convert("UTC").dt.tz_localize(None)
+            else:
+                df["transaction_datetime"] = ts
+        except Exception:
+            try:
+                ts2 = pd.to_datetime(df["transaction_datetime"], errors="coerce", utc=True)
+                if hasattr(ts2.dt, "tz"):
+                    df["transaction_datetime"] = ts2.dt.tz_convert("UTC").dt.tz_localize(None)
+                else:
+                    df["transaction_datetime"] = ts2
+            except Exception:
+                s = df["transaction_datetime"].astype(str).fillna("")
+                s = s.str.replace(r"(\+|-)\d{2}:?\d{2}$|Z$", "", regex=True)
+                df["transaction_datetime"] = pd.to_datetime(s, errors="coerce")
     else:
         df["transaction_datetime"] = pd.NaT
 
@@ -213,16 +229,24 @@ def calculate_independent_rule_groups(df: pd.DataFrame) -> pd.Series:
 
 def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.0, behavioral_threshold: float = 0.6) -> pd.DataFrame:
     df = df.copy()
-    # response signals
-    df = generate_response_code_signal(df)
-    # behavioral features
+    # generate behavioral features (this will add required binary rule columns)
     df = generate_behavioral_risk_features(df, amount_threshold=amount_threshold)
-    # behavioral score
+
+    # incorporate response_code high-risk signals as an immediate proxy label
+    try:
+        df = generate_response_code_signal(df)
+        # if response_high_risk present, force proxy label
+        if "response_high_risk" in df.columns:
+            df.loc[df["response_high_risk"] == 1, "is_fraud_proxy"] = 1
+    except Exception:
+        # ignore if response code handling fails
+        pass
+
+    # behavioral score and independent groups
     df["behavioral_risk_score"] = calculate_behavioral_risk_score(df)
-    # independent groups
     df["independent_rule_groups"] = calculate_independent_rule_groups(df)
 
-    # create list of binary rule columns names
+    # create list of binary rule column names we consider for reasons
     binary_rules = [
         "feature_high_amount", "feature_high_amount_1h", "feature_high_amount_1d", "feature_night_transaction", "feature_weekend_transaction",
         "feature_international_transaction", "feature_many_customer_transactions_day", "feature_many_customer_transactions_hour", "feature_many_merchants_customer_day",
@@ -230,22 +254,26 @@ def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.
         "feature_same_merchant_20_cards_by_product_presence", "feature_tnp_50_approved_by_product",
     ]
 
-    # reason composition
-    def make_reason(row):
+    # Ensure binary rule columns exist
+    for f in binary_rules:
+        if f not in df.columns:
+            df[f] = 0
+
+    # risk signals (all activated signals for diagnostics)
+    def make_risk_signal_reason(row):
         reasons = []
-        if row.get("response_high_risk", 0) == 1:
-            reasons.append(str(row.get("response_code_reason", "")))
         for f in binary_rules:
-            if row.get(f, 0) == 1:
-                reasons.append(f.upper())
+            try:
+                if int(row.get(f, 0)) == 1:
+                    reasons.append(f.upper())
+            except Exception:
+                continue
         return "|".join(reasons) if reasons else "NONE"
 
-    df["fraud_label_reason"] = df.apply(make_reason, axis=1)
+    df["risk_signal_reason"] = df.apply(make_risk_signal_reason, axis=1)
 
-    # decide proxy label
+    # decide proxy label purely from behavioral signals
     def decide(row):
-        if int(row.get("response_high_risk", 0)) == 1:
-            return 1
         if float(row.get("behavioral_risk_score", 0)) >= behavioral_threshold and int(row.get("independent_rule_groups", 0)) >= 3:
             return 1
         return 0
@@ -253,22 +281,27 @@ def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.
     df["is_fraud_proxy"] = df.apply(decide, axis=1).astype(int)
     df["is_fraud"] = df["is_fraud_proxy"]
 
-    def label_source(row):
-        resp = int(row.get("response_high_risk", 0))
-        beh = 1 if (float(row.get("behavioral_risk_score", 0)) >= behavioral_threshold and int(row.get("independent_rule_groups", 0)) >= 3) else 0
-        if resp == 1 and beh == 1:
-            return "response_and_behavioral"
-        if resp == 1:
-            return "response_code_high_risk"
-        if beh == 1:
-            return "behavioral_weak_label"
-        return "no_proxy_risk_detected"
+    # fraud_label_reason only when positive
+    def make_fraud_label_reason(row):
+        if int(row.get("is_fraud", 0)) == 1:
+            return row.get("risk_signal_reason", "NONE")
+        return "NO_PROXY_FRAUD_LABEL"
 
-    df["label_source"] = df.apply(label_source, axis=1)
+    df["fraud_label_reason"] = df.apply(make_fraud_label_reason, axis=1)
 
-    # Ensure binary rule columns exist
-    for f in binary_rules:
-        if f not in df.columns:
-            df[f] = 0
+    # label_source
+    df["label_source"] = df["is_fraud"].apply(lambda x: "behavioral_weak_label" if int(x) == 1 else "no_proxy_risk_detected")
+
+    # If response code indicates high risk, override and mark as proxy fraud
+    try:
+        if "response_high_risk" in df.columns and "response_code_reason" in df.columns:
+            mask_resp = df["response_high_risk"] == 1
+            if mask_resp.any():
+                df.loc[mask_resp, "is_fraud_proxy"] = 1
+                df.loc[mask_resp, "is_fraud"] = 1
+                df.loc[mask_resp, "fraud_label_reason"] = df.loc[mask_resp, "response_code_reason"].fillna("RESPONSE_CODE_HIGH_RISK")
+                df.loc[mask_resp, "label_source"] = "response_code_proxy"
+    except Exception:
+        pass
 
     return df

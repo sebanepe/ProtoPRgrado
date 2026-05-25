@@ -166,7 +166,14 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         parsed_dt = parsed_dt.dt.tz_convert('UTC').dt.tz_localize(None)
     except Exception:
         # fallback to naive parsing if something unexpected happens
-        parsed_dt = pd.to_datetime(df["transaction_datetime"], errors="coerce")
+        try:
+            parsed_dt = pd.to_datetime(df["transaction_datetime"], errors="coerce", utc=True)
+            if hasattr(parsed_dt.dt, "tz"):
+                parsed_dt = parsed_dt.dt.tz_convert("UTC").dt.tz_localize(None)
+        except Exception:
+            s = df["transaction_datetime"].astype(str).fillna("")
+            s = s.str.replace(r"(\+|-)\d{2}:?\d{2}$|Z$", "", regex=True)
+            parsed_dt = pd.to_datetime(s, errors="coerce")
     df["transaction_datetime"] = parsed_dt
 
     # Clean and convert amount: handle comma decimals, remove quotes/spaces and non-numeric chars
@@ -199,8 +206,6 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         valid_records.append(rec)
 
     num_inserted = 0
-    if valid_records:
-        num_inserted = transaction_repository.insert_transactions(db, valid_records)
 
     # Persist original uploaded file to storage for raw access in preprocessing
     storage_dir = os.environ.get('DATASET_STORAGE', '/tmp/datasets')
@@ -219,6 +224,7 @@ def import_dataset(db: Session, file, name: str, file_name: str):
     except Exception:
         dest_path = None
 
+    # Create dataset record first so we can associate inserted transactions
     dataset = dataset_repository.create_dataset(
         db,
         name=name,
@@ -226,9 +232,24 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         file_path=dest_path,
         original_filename=file_name,
         total_records=total,
-        valid_records=len(valid_records),
+        valid_records=0,
         invalid_records=len(invalid_df),
-        status="imported",
+        status="importing",
     )
 
-    return {"dataset": dataset, "inserted": num_inserted, "total": total, "valid": len(valid_records), "invalid": len(invalid_df)}
+    if valid_records:
+        num_inserted = transaction_repository.insert_transactions(db, valid_records, dataset_id=dataset.id)
+
+    # Update dataset with accurate counts and mark imported
+    try:
+        dataset.total_records = total
+        dataset.valid_records = num_inserted
+        dataset.invalid_records = len(invalid_df)
+        dataset.status = "imported"
+        dataset.file_path = dest_path
+        db.add(dataset)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return {"dataset": dataset, "inserted": num_inserted, "total": total, "valid": num_inserted, "invalid": len(invalid_df)}

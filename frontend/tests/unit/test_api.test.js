@@ -50,4 +50,21 @@ describe('API service functions', () => {
     // la respuesta debe contener el id del model_config devuelto por la API
     expect(res.id).toBe(1)
   })
+
+  it('getPreprocessingRunStages should call /preprocessing/runs/:id/stages and return stages', async () => {
+    const mockStages = { run_id: 2, stages: { limpieza: 'COMPLETED', smote: 'NOT_APPLIED' }, status: 'COMPLETED' }
+    api.default.get.mockResolvedValueOnce({ data: mockStages })
+    const res = await api.getPreprocessingRunStages(2)
+    expect(api.default.get).toHaveBeenCalledWith('/preprocessing/runs/2/stages')
+    expect(res.stages.limpieza).toBe('COMPLETED')
+    expect(res.status).toBe('COMPLETED')
+  })
+
+  it('downloadPreprocessingRun should call /preprocessing/runs/:id/download with blob', async () => {
+    const fakeBlob = new Blob(['a,b\n1,2'], { type: 'text/csv' })
+    api.default.get.mockResolvedValueOnce({ data: fakeBlob })
+    const res = await api.downloadPreprocessingRun(5)
+    expect(api.default.get).toHaveBeenCalledWith('/preprocessing/runs/5/download', { responseType: 'blob' })
+    expect(res).toBeInstanceOf(Blob)
+  })
 })

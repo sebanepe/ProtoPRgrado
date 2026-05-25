@@ -18,11 +18,11 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if "transaction_datetime" not in df.columns:
         # try common combos
         if "date" in df.columns and "time" in df.columns:
-            df["transaction_datetime"] = pd.to_datetime(df["date"].astype(str) + " " + df["time"].astype(str), errors="coerce")
+            df["transaction_datetime"] = pd.to_datetime(df["date"].astype(str) + " " + df["time"].astype(str), errors="coerce", utc=True)
         else:
             for c in ["transaction_datetime", "datetime", "fecha", "fecha_hora"]:
                 if c in df.columns:
-                    df["transaction_datetime"] = pd.to_datetime(df[c], errors="coerce")
+                    df["transaction_datetime"] = pd.to_datetime(df[c], errors="coerce", utc=True)
                     break
     # customer_hash, merchant_hash
     if "customer_hash" not in df.columns:

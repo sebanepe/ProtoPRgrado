@@ -44,6 +44,7 @@ class Transaction(Base):
     device_id = Column(String(255), nullable=True)
     customer_hash = Column(String(255), nullable=True, index=True)
     transaction_datetime = Column(DateTime(timezone=True), nullable=False)
+    dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True)
     is_fraud = Column(Boolean, nullable=False, default=False)
     imported_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

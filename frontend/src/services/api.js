@@ -75,9 +75,18 @@ export async function importDataset(file){
   const form = new FormData(); form.append('file', file)
   return api.post('/datasets/import', form, { headers: {'Content-Type':'multipart/form-data'} }).then(r=>r.data)
 }
-export async function runPreprocessing(){ return api.post('/preprocessing/run').then(r=>r.data) }
+export async function runPreprocessing(datasetId = null){
+  // If datasetId provided, send as query param so backend can scope run
+  if (datasetId) {
+    return api.post('/preprocessing/run', null, { params: { dataset_id: datasetId } }).then(r=>r.data)
+  }
+  return api.post('/preprocessing/run').then(r=>r.data)
+}
 export async function listPreprocessingRuns(){ return api.get('/preprocessing/runs').then(r=> r.data || []) }
 export async function previewPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/preview`).then(r=> r.data) }
+export async function getPreprocessingRunStages(id){ return api.get(`/preprocessing/runs/${id}/stages`).then(r=> r.data) }
+export async function downloadPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/download`, { responseType: 'blob' }).then(r=> r.data) }
+export async function deletePreprocessingRun(id){ return api.delete(`/preprocessing/runs/${id}`).then(r=> r.data) }
 export async function listDatasets(params){ return api.get('/datasets', { params }).then(r=> r.data && r.data.datasets ? r.data.datasets : []) }
 export async function previewDataset(id, rows=10){ return api.get(`/datasets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
 export async function deleteDataset(id){ return api.delete(`/datasets/${id}`).then(r=> r.data) }

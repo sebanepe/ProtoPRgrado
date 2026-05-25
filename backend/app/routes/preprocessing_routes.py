@@ -9,14 +9,15 @@ import pandas as pd
 import numpy as np
 from backend.app.models.models import PreprocessingRun, Transaction
 from backend.app.services.permission_service import require_permission
+from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/preprocessing", tags=["preprocessing"])
 
 
 @router.post("/run")
-def run_preprocessing(db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+def run_preprocessing(dataset_id: int | None = None, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
     try:
-        summary = preprocessing_service.run_preprocessing(db)
+        summary = preprocessing_service.run_preprocessing(db, dataset_id=dataset_id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     return {"status": "ok", "summary": summary}
@@ -99,3 +100,123 @@ def get_run_details(run_id: int, db: Session = Depends(get_db), _auth=Depends(re
         "started_at": r.started_at,
         "finished_at": r.finished_at,
     }
+
+
+
+@router.get("/runs/{run_id}/stages")
+def get_run_stages(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    """Return inferred stage statuses for a preprocessing run.
+
+    Stages: Limpieza, Normalización, Codificación, SMOTE. The endpoint infers
+    completion by inspecting the `PreprocessingRun` row and the saved CSV output
+    (when available). This is additive and preserves existing routes/contracts.
+    """
+    r = db.query(PreprocessingRun).filter(PreprocessingRun.id == run_id).first()
+    if not r:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+
+    # default: pending
+    stages = {
+        "limpieza": "PENDING",
+        "normalizacion": "PENDING",
+        "codificacion": "PENDING",
+        "smote": "PENDING",
+    }
+
+    # map run status
+    if r.status == "RUNNING":
+        # running -> limpieza executing
+        stages["limpieza"] = "EXECUTING"
+        return {"run_id": r.id, "stages": stages, "status": r.status}
+    if r.status == "FAILED":
+        # failed -> mark error
+        for k in stages:
+            stages[k] = "ERROR"
+        return {"run_id": r.id, "stages": stages, "status": r.status, "error": r.error_message}
+
+    # Completed or other statuses: infer from numbers and output file
+    try:
+        total = int(r.total_records or 0)
+        processed_count = int(r.processed_records or 0)
+    except Exception:
+        total = 0
+        processed_count = 0
+
+    # Limpieza: if any processed rows kept
+    stages["limpieza"] = "COMPLETED" if processed_count >= 0 else "PENDING"
+
+    # If output file exists, load it to inspect columns and rows
+    output_path = r.output_file_path
+    if output_path and os.path.exists(output_path):
+        try:
+            df_out = pd.read_csv(output_path)
+            # Normalizacion: look for scaled numeric column or simply presence of 'amount_scaled'
+            if "amount_scaled" in df_out.columns:
+                stages["normalizacion"] = "COMPLETED"
+            else:
+                # if numeric columns were transformed, still consider completed when file exists
+                stages["normalizacion"] = "COMPLETED"
+
+            # Codificacion: presence of categorical dummies (has underscore or known prefixes)
+            dummy_like = any(("_" in c and c not in ("is_fraud", "fraud_label_reason")) for c in df_out.columns)
+            stages["codificacion"] = "COMPLETED" if dummy_like else "PENDING"
+
+            # SMOTE: if output rows > processed_records stored in run, SMOTE likely applied
+            out_rows = len(df_out)
+            if out_rows > processed_count:
+                stages["smote"] = "COMPLETED"
+            else:
+                stages["smote"] = "NOT_APPLIED"
+
+        except Exception as e:
+            for k in stages:
+                stages[k] = "ERROR"
+            return {"run_id": r.id, "stages": stages, "status": r.status, "error": str(e)}
+    else:
+        # no output file, mark downstream stages pending
+        stages["normalizacion"] = "PENDING"
+        stages["codificacion"] = "PENDING"
+        stages["smote"] = "PENDING"
+
+    return {"run_id": r.id, "stages": stages, "status": r.status}
+
+
+
+@router.get("/runs/{run_id}/download")
+def download_processed_run(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    """Return the processed CSV file for a given preprocessing run.
+
+    This returns a FileResponse so the frontend can download and inspect the
+    canonical processed CSV saved under `PROJECT_PROCESSED_DIR`.
+    """
+    r = db.query(PreprocessingRun).filter(PreprocessingRun.id == run_id).first()
+    if not r:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+
+    if not r.output_file_path or not os.path.exists(r.output_file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="processed file not found")
+
+    # use FileResponse to stream file to client; let FastAPI/CORS middleware handle headers
+    return FileResponse(path=r.output_file_path, filename=os.path.basename(r.output_file_path), media_type='text/csv')
+
+
+@router.post("/runs/{run_id}/rerun")
+def rerun_preprocessing(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    try:
+        summary = preprocessing_service.rerun_preprocessing(db, run_id=run_id)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder({"status": "ok", "summary": summary}))
+
+
+
+@router.delete("/runs/{run_id}")
+def delete_run(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    """Delete a preprocessing run and any associated files."""
+    try:
+        preprocessing_service.delete_preprocessing_run(db, run_id=run_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder({"status": "ok"}))
