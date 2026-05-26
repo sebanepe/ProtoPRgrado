@@ -3,6 +3,9 @@ import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPrep
 
 export default function Preprocessing(){
   const [msg,setMsg] = useState('')
+  const [showResultModal, setShowResultModal] = useState(false)
+  const [resultDetails, setResultDetails] = useState(null)
+  const [showResultDetailsJson, setShowResultDetailsJson] = useState(false)
   const [datasets, setDatasets] = useState([])
   const [preview, setPreview] = useState(null)
   const [runs, setRuns] = useState([])
@@ -13,7 +16,10 @@ export default function Preprocessing(){
     setMsg('Ejecutando...')
     try{
       const res = await runPreprocessing()
-      setMsg('Listo: '+ JSON.stringify(res))
+      setMsg('Listo')
+      setResultDetails(res)
+      setShowResultDetailsJson(false)
+      setShowResultModal(true)
       await loadRuns()
     }catch(e){ setMsg('Error: '+ (e?.message||e)) }
   }
@@ -23,7 +29,10 @@ export default function Preprocessing(){
     try{
       // call backend with selected dataset id so processing is scoped
       const res = await runPreprocessing(datasetId)
-      setMsg('Listo: '+ JSON.stringify(res))
+      setMsg('Listo')
+      setResultDetails(res)
+      setShowResultDetailsJson(false)
+      setShowResultModal(true)
       await loadRuns()
     }catch(e){ setMsg('Error: '+ (e?.response?.data?.detail || e?.message || String(e))) }
   }
@@ -250,6 +259,29 @@ export default function Preprocessing(){
 
       </div>
       <div style={{marginTop:10}} className="card">{msg || 'Presiona para ejecutar SMOTE y transformar datos'}</div>
+
+      {showResultModal && (
+        <div style={{position:'fixed',left:0,top:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}} onClick={()=>setShowResultModal(false)}>
+          <div style={{width:700,maxWidth:'95%',background:'#fff',padding:20,borderRadius:6,boxShadow:'0 8px 30px rgba(0,0,0,0.2)'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h3 style={{margin:0}}>Resultado del preprocesamiento</h3>
+              <div>
+                <button className="button" onClick={()=>{setShowResultModal(false)}}>Cerrar</button>
+              </div>
+            </div>
+            <div style={{marginTop:12}}>
+              <div><strong>Estado:</strong> {resultDetails?.status ?? 'Desconocido'}</div>
+              <div style={{marginTop:6}}><strong>Resumen:</strong> {resultDetails?.summary ? `before:${resultDetails.summary.before}, after:${resultDetails.summary.after_clean ?? resultDetails.summary.after}` : 'No disponible'}</div>
+              <div style={{marginTop:10}}>
+                <button className="button" onClick={()=>setShowResultDetailsJson(s=>!s)}>{showResultDetailsJson ? 'Ocultar detalles' : 'Ver detalles'}</button>
+              </div>
+              {showResultDetailsJson && (
+                <pre style={{marginTop:10,maxHeight:360,overflow:'auto',background:'#f7f7f7',padding:10,borderRadius:4}}>{JSON.stringify(resultDetails, null, 2)}</pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
