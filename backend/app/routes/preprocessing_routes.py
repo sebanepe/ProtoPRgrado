@@ -23,6 +23,15 @@ def run_preprocessing(dataset_id: int | None = None, db: Session = Depends(get_d
     return {"status": "ok", "summary": summary}
 
 
+@router.post("/run_training")
+def run_preprocessing_training(run_id: int | None = None, training_path: str | None = None, apply_smote: bool = True, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    try:
+        report = preprocessing_service.run_preprocessing_for_training(db, run_id=run_id, training_dataset_path=training_path, apply_smote=apply_smote)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder({"status": "ok", "report": report}))
+
+
 @router.get("/runs")
 def list_runs(db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
     rows = db.query(PreprocessingRun).order_by(PreprocessingRun.started_at.desc()).limit(200).all()

@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react'
-import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun } from '../services/api'
+import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun, runPreprocessingTraining, previewFeatureSet, downloadFeatureSet, deleteFeatureSet } from '../services/api'
 
 export default function Preprocessing(){
   const [msg,setMsg] = useState('')
@@ -11,6 +11,7 @@ export default function Preprocessing(){
   const [runs, setRuns] = useState([])
   const [runPreview, setRunPreview] = useState(null)
   const [loadingDatasets, setLoadingDatasets] = useState(false)
+  const [createdFeatureSet, setCreatedFeatureSet] = useState(null)
 
   const run = async ()=>{
     setMsg('Ejecutando...')
@@ -130,6 +131,51 @@ export default function Preprocessing(){
     }catch(e){ setMsg('Error borrando run: ' + (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
+  const handleRunTraining = async (runId) => {
+    setMsg('Preparando datos para entrenamiento para run ' + runId + '...')
+    try{
+      const res = await runPreprocessingTraining(runId)
+      setMsg('Datos preparados para entrenamiento: ' + (res?.report ? `feature_set_id=${res.report.feature_set_id}` : 'OK'))
+      setResultDetails(res)
+      setShowResultDetailsJson(true)
+      setShowResultModal(true)
+      // store created feature set info for quick visualization
+      if(res && res.report && res.report.feature_set_id){
+        setCreatedFeatureSet({ id: res.report.feature_set_id, payload: res.report })
+      }
+    }catch(e){ setMsg('Error en fase B: ' + (e?.response?.data?.detail || e?.message || String(e))) }
+  }
+
+  const handlePreviewFeatureSet = async (id)=>{
+    try{
+      const p = await previewFeatureSet(id, 20)
+      setRunPreview({ loading:false, data: { run: { id: `feature_set_${id}`, status: 'CREATED' }, before: [], after: p.rows || [], stages: null } })
+    }catch(e){ alert('Error al obtener previsualización: ' + (e?.response?.data?.detail || e?.message || String(e))) }
+  }
+
+  const handleDownloadFeatureSet = async (id)=>{
+    try{
+      const blob = await downloadFeatureSet(id)
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `feature_set_${id}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    }catch(e){ alert('Error descargando el CSV: ' + (e?.response?.data?.detail || e?.message || String(e))) }
+  }
+
+  const handleDeleteFeatureSet = async (id)=>{
+    if(!window.confirm('¿Borrar feature set #' + id + '?')) return
+    try{
+      await deleteFeatureSet(id)
+      setMsg('Feature set ' + id + ' borrado')
+      setCreatedFeatureSet(null)
+    }catch(e){ alert('Error borrando feature set: ' + (e?.response?.data?.detail || e?.message || String(e))) }
+  }
+
   return (
     <div>
       <div className="header"><h2>Preprocesamiento</h2>
@@ -180,10 +226,11 @@ export default function Preprocessing(){
                       <td>{rr.processed_records}</td>
                       <td>{rr.removed_records}</td>
                       <td style={{display:'flex',gap:8}}>
-                        <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
-                        <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
-                        <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
-                      </td>
+                          <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
+                          <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
+                        <button className="button" onClick={()=>handleRunTraining(rr.id)}>Preparación para entrenamiento</button>
+                          <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
+                        </td>
                     </tr>
                   ))}
                 </tbody>
@@ -259,6 +306,20 @@ export default function Preprocessing(){
 
       </div>
       <div style={{marginTop:10}} className="card">{msg || 'Presiona para ejecutar SMOTE y transformar datos'}</div>
+
+      {createdFeatureSet && (
+        <div style={{marginTop:12}} className="card">
+          <h3>Datos preparados para entrenamiento</h3>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div>Feature set id: <strong>{createdFeatureSet.id}</strong></div>
+            <div style={{display:'flex',gap:8}}>
+              <button className="button" onClick={()=>handlePreviewFeatureSet(createdFeatureSet.id)}>Previsualizar</button>
+              <button className="button" onClick={()=>handleDownloadFeatureSet(createdFeatureSet.id)}>Descargar CSV</button>
+              <button className="button danger" onClick={()=>handleDeleteFeatureSet(createdFeatureSet.id)}>Borrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showResultModal && (
         <div style={{position:'fixed',left:0,top:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}} onClick={()=>setShowResultModal(false)}>

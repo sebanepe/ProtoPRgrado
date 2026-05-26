@@ -87,6 +87,10 @@ export async function previewPreprocessingRun(id){ return api.get(`/preprocessin
 export async function getPreprocessingRunStages(id){ return api.get(`/preprocessing/runs/${id}/stages`).then(r=> r.data) }
 export async function downloadPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/download`, { responseType: 'blob' }).then(r=> r.data) }
 export async function deletePreprocessingRun(id){ return api.delete(`/preprocessing/runs/${id}`).then(r=> r.data) }
+export async function runPreprocessingTraining(runId){ return api.post('/preprocessing/run_training', null, { params: { run_id: runId } }).then(r=> r.data) }
+export async function previewFeatureSet(id, rows=10){ return api.get(`/feature_sets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
+export async function downloadFeatureSet(id){ return api.get(`/feature_sets/${id}/download`, { responseType: 'blob' }).then(r=> r.data) }
+export async function deleteFeatureSet(id){ return api.delete(`/feature_sets/${id}`).then(r=> r.data) }
 export async function listDatasets(params){ return api.get('/datasets', { params }).then(r=> r.data && r.data.datasets ? r.data.datasets : []) }
 export async function previewDataset(id, rows=10){ return api.get(`/datasets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
 export async function deleteDataset(id){ return api.delete(`/datasets/${id}`).then(r=> r.data) }

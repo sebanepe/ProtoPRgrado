@@ -226,3 +226,104 @@ def delete_preprocessing_run(db: Session, run_id: int):
     except Exception as e:
         db.rollback()
         raise
+
+
+def run_preprocessing_for_training(db: Session, run_id: int | None = None, training_dataset_path: str | None = None, apply_smote: bool = True):
+    """Run Phase B preprocessing for training: load a processed CSV (or run id),
+    select features, split train/test, build pipeline, optionally apply SMOTE,
+    and persist a FeatureSet record.
+    """
+    import json
+    from backend.app.ml import preprocessing as mlp
+
+    # resolve dataset path
+    resolved_path = None
+    if training_dataset_path:
+        resolved_path = training_dataset_path
+    elif run_id is not None:
+        # prefer training_dataset_run_{id}.csv then cleaned_dataset_run_{id}.csv
+        tpath = os.path.join(PROJECT_PROCESSED_DIR, f"training_dataset_run_{run_id}.csv")
+        cpath = os.path.join(PROJECT_PROCESSED_DIR, f"cleaned_dataset_run_{run_id}.csv")
+        if os.path.exists(tpath):
+            resolved_path = tpath
+        elif os.path.exists(cpath):
+            resolved_path = cpath
+
+    if not resolved_path or not os.path.exists(resolved_path):
+        raise ValueError("training dataset file not found")
+
+    # load dataframe
+    df = pd.read_csv(resolved_path)
+
+    # get X, y according to Phase B rules
+    X, y = mlp.get_training_columns(df)
+
+    # split
+    X_train, X_test, y_train, y_test = mlp.split_train_test(X, y)
+
+    # build preprocessing pipeline based on X (use full X to detect types)
+    preprocessor, pipeline = mlp.build_preprocessing_pipeline(X)
+
+    # apply SMOTE only on X_train/y_train if requested
+    smote_report = None
+    X_train_res, y_train_res = X_train, y_train
+    if apply_smote:
+        X_train_res, y_train_res, smote_report = mlp.apply_smote_if_needed(X_train, y_train)
+
+    # persist a FeatureSet record (we store metadata in feature_columns_json as a dict)
+    feature_cols = list(X.columns)
+    excluded = [c for c in df.columns if c not in feature_cols]
+
+    # create initial FeatureSet row
+    fs = FeatureSet(
+        dataset_id=None,
+        preprocessing_run_id=run_id,
+        name=f"feature_set_{run_id or 'manual'}_{int(datetime.now().timestamp())}",
+        file_path=resolved_path,
+        row_count=len(X),
+        feature_columns_json=json.dumps({"features": feature_cols}),
+        excluded_columns_json=json.dumps(excluded),
+    )
+    db.add(fs)
+    db.commit()
+    db.refresh(fs)
+
+    # Fit and persist the preprocessing pipeline (pickle)
+    try:
+        # fit pipeline on training features (after any SMOTE)
+        try:
+            pipeline.fit(X_train_res)
+        except Exception:
+            # fallback: fit on full X
+            pipeline.fit(X)
+        os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
+        pipeline_path = os.path.join(PROJECT_PROCESSED_DIR, f"pipeline_feature_set_{fs.id}.pkl")
+        import pickle
+        with open(pipeline_path, "wb") as f:
+            pickle.dump(pipeline, f)
+    except Exception:
+        pipeline_path = None
+
+    # update feature set with pipeline path and smote report stored in dedicated columns
+    try:
+        fs.pipeline_path = pipeline_path
+        fs.smote_report_json = json.dumps(smote_report) if smote_report is not None else None
+        # keep legacy metadata too
+        meta = {"features": feature_cols}
+        fs.feature_columns_json = json.dumps(meta)
+    except Exception:
+        pass
+    db.add(fs)
+    db.commit()
+    db.refresh(fs)
+
+    report = {
+        "feature_set_id": fs.id,
+        "feature_count": len(feature_cols),
+        "row_count": len(X),
+        "train_rows": len(X_train),
+        "test_rows": len(X_test),
+        "smote_report": smote_report,
+        "pipeline_path": pipeline_path,
+    }
+    return report

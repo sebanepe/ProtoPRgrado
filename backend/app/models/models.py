@@ -154,6 +154,8 @@ class FeatureSet(Base):
     file_path = Column(String(1024), nullable=False)
     row_count = Column(Integer, nullable=False, default=0)
     feature_columns_json = Column(Text, nullable=True)
+    smote_report_json = Column(Text, nullable=True)
+    pipeline_path = Column(String(1024), nullable=True)
     excluded_columns_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

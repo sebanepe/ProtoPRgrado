@@ -421,3 +421,185 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
 def save_processed(df: pd.DataFrame, output_path: str):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False)
+
+
+def get_training_columns(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+    """Return X, y for training: y is `is_fraud`, X excludes sensitive/label/fuga columns."""
+    if df is None or df.empty:
+        return pd.DataFrame(), pd.Series(dtype=int)
+    df = df.copy()
+    # ensure consistent lowercase column names
+    cols = [c for c in df.columns]
+
+    exclude = {
+        "is_fraud",
+        "is_fraud_proxy",
+        "label_source",
+        "fraud_label_reason",
+        "risk_signal_reason",
+        "behavioral_risk_score",
+        "independent_rule_groups",
+        # response code variants
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+        "codigo_respuesta",
+    }
+    # additional variants
+    for v in ["codigo_respuesta", "response_code", "cod_respuesta", "respuesta", "codigo_respuesta", "codigo_respuesta"]:
+        exclude.add(v)
+
+    sensitive = {
+        "pan_tarjeta",
+        "tarjeta",
+        "pan_card",
+        "masked_card",
+        "customer_hash",
+        "merchant_hash",
+        "device_id",
+        "transaction_id",
+        "authorization_code",
+        "codigo_autorizacion",
+        "reference_number",
+        "numero_referencia",
+    }
+
+    exclude = exclude.union(sensitive)
+
+    # drop any of the excluded columns that exist
+    X = df.drop(columns=[c for c in df.columns if c in exclude], errors="ignore")
+
+    # target
+    y = None
+    if "is_fraud" in df.columns:
+        y = df["is_fraud"].astype(int)
+    else:
+        y = pd.Series([0] * len(df), index=df.index, dtype=int)
+
+    return X, y
+
+
+def split_train_test(X: pd.DataFrame, y: pd.Series, test_size: float = 0.2, random_state: int = 42):
+    """Split into train/test using stratify when possible."""
+    from sklearn.model_selection import train_test_split
+
+    if X is None or X.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.Series(dtype=int), pd.Series(dtype=int)
+
+    stratify = None
+    try:
+        if y is not None and len(y.unique()) > 1:
+            stratify = y
+    except Exception:
+        stratify = None
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=stratify
+    )
+    return X_train, X_test, y_train, y_test
+
+
+def detect_feature_types(X: pd.DataFrame):
+    """Detect numeric, categorical and boolean columns in X."""
+    if X is None or X.empty:
+        return {"numeric": [], "categorical": [], "boolean": []}
+
+    numeric = X.select_dtypes(include=[np.number]).columns.tolist()
+    # boolean columns: dtype bool or numeric with only 0/1
+    boolean = [c for c in X.columns if X[c].dtype == bool]
+    for c in X.columns:
+        if c not in boolean and c not in numeric:
+            # check if numeric-like but stored as object with 0/1
+            vals = X[c].dropna().unique()
+            if len(vals) > 0 and set([str(v) for v in vals]).issubset({"0", "1", "0.0", "1.0", "True", "False", "true", "false"}):
+                boolean.append(c)
+
+    # categorical: object, category, but exclude boolean
+    categorical = [c for c in X.select_dtypes(include=[object, "category"]).columns.tolist() if c not in boolean]
+
+    # ensure numeric does not contain boolean columns
+    numeric = [c for c in numeric if c not in boolean]
+
+    return {"numeric": numeric, "categorical": categorical, "boolean": boolean}
+
+
+def build_preprocessing_pipeline(X: pd.DataFrame):
+    """Build ColumnTransformer for numeric scaling and categorical one-hot encoding.
+
+    Returns the ColumnTransformer and a sklearn Pipeline that applies it.
+    """
+    from sklearn.pipeline import Pipeline
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+
+    types = detect_feature_types(X)
+
+    numeric_cols = types["numeric"]
+    cat_cols = types["categorical"]
+    bool_cols = types["boolean"]
+
+    transformers = []
+    if numeric_cols:
+        transformers.append(("num", StandardScaler(), numeric_cols))
+    if cat_cols:
+        # sklearn API changed from `sparse` to `sparse_output` in newer versions
+        try:
+            ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+        except TypeError:
+            ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)
+        transformers.append(("cat", ohe, cat_cols))
+    if bool_cols:
+        # convert boolean-like to int
+        transformers.append(("bool", Pipeline([("to_int", FunctionTransformer(lambda x: x.astype(int), validate=False))]), bool_cols))
+
+    preprocessor = ColumnTransformer(transformers=transformers, remainder="drop")
+
+    pipeline = Pipeline([("preprocessor", preprocessor)])
+    return preprocessor, pipeline
+
+
+def apply_smote_if_needed(X_train: pd.DataFrame, y_train: pd.Series):
+    """Apply SMOTE to X_train/y_train when appropriate.
+
+    Returns X_res, y_res, report dict
+    """
+    report = {"smote_applied": False, "before_distribution": {}, "after_distribution": {}, "reason": None}
+
+    try:
+        from collections import Counter
+        from imblearn.over_sampling import SMOTE
+    except Exception as e:
+        report["reason"] = f"imblearn_missing:{e}"
+        return X_train, y_train, report
+
+    if y_train is None or len(y_train.unique()) <= 1:
+        report["reason"] = "single_class"
+        report["before_distribution"] = dict(Counter(y_train))
+        return X_train, y_train, report
+
+    counts = dict(y_train.value_counts().to_dict())
+    report["before_distribution"] = counts
+    minority_count = min(counts.values())
+
+    # determine k_neighbors safe
+    k_neighbors = min(5, max(1, minority_count - 1))
+    if minority_count < 2:
+        report["reason"] = "too_few_minority"
+        return X_train, y_train, report
+
+    try:
+        sm = SMOTE(random_state=42, k_neighbors=k_neighbors)
+        X_res, y_res = sm.fit_resample(X_train, y_train)
+        report["smote_applied"] = True
+        report["after_distribution"] = dict(pd.Series(y_res).value_counts().to_dict())
+        return X_res, y_res, report
+    except Exception as e:
+        report["reason"] = f"smote_failed:{e}"
+        return X_train, y_train, report
+
