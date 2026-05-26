@@ -315,6 +315,8 @@ class SystemLog(Base):
     action = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ip = Column(String(64), nullable=True)
+    user_agent = Column(String(1024), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user = relationship("User", back_populates="logs")

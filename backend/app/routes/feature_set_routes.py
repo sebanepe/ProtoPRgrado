@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
@@ -44,7 +44,7 @@ def download_feature_set(fs_id: int, db: Session = Depends(get_db), _auth=Depend
 
 
 @router.delete("/{fs_id}")
-def delete_feature_set(fs_id: int, db: Session = Depends(get_db), user=Depends(get_user_from_header), _auth=Depends(require_permission("preprocess"))):
+def delete_feature_set(fs_id: int, db: Session = Depends(get_db), user=Depends(get_user_from_header), request: Request = None, _auth=Depends(require_permission("preprocess"))):
     fs = db.query(FeatureSet).filter(FeatureSet.id == fs_id).first()
     if not fs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feature_set not found")
@@ -64,7 +64,18 @@ def delete_feature_set(fs_id: int, db: Session = Depends(get_db), user=Depends(g
     try:
         # create audit log
         try:
-            log = SystemLog(action="delete_feature_set", description=f"Deleted feature_set {fs.id}", user_id=getattr(user, 'id', None))
+            ip = None
+            ua = None
+            try:
+                if request and hasattr(request, 'client') and request.client:
+                    ip = request.client.host
+            except Exception:
+                ip = None
+            try:
+                ua = request.headers.get('user-agent') if request else None
+            except Exception:
+                ua = None
+            log = SystemLog(action="delete_feature_set", description=f"Deleted feature_set {fs.id}", user_id=getattr(user, 'id', None), ip=ip, user_agent=ua)
             db.add(log)
             db.commit()
         except Exception:
