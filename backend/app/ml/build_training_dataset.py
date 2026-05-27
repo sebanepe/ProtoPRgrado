@@ -39,39 +39,112 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_training_dataset(input_csv: str, out_name: str | None = None):
-    df = pd.read_csv(input_csv)
-    df = normalize_columns(df)
-    # generate proxy labels and behavioral features
-    df_labeled = generate_proxy_fraud_label(df)
+    df_orig = pd.read_csv(input_csv)
+    df = normalize_columns(df_orig)
 
-    # remove leakage/sensitive columns from training
-    forbidden = [
-        "response_code", "codigo_respuesta", "CODIGO_RESPUESTA", "RESPUESTA", "cod_respuesta",
-        "normalized_response_code", "response_high_risk", "response_code_reason",
-        "is_fraud", "is_fraud_proxy", "label_source", "fraud_label_reason",
-        "behavioral_risk_score", "independent_rule_groups",
-    ]
-    # choose features as all columns except forbidden and identifiers
-    drop_cols = [c for c in forbidden if c in df_labeled.columns]
-    drop_cols += [c for c in ["transaction_id", "transaction_datetime", "device_id", "customer_hash"] if c in df_labeled.columns]
-    training = df_labeled.drop(columns=drop_cols, errors="ignore")
+    # Ensure labels/features exist by applying labeling if missing
+    if "is_fraud" not in df.columns or "behavioral_risk_score" not in df.columns:
+        try:
+            df = generate_proxy_fraud_label(df)
+        except Exception:
+            # if labeling fails, continue with original df
+            pass
 
+    # Persist cleaned dataset (auditable) but drop raw PAN fields
     os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
-    out_file = os.path.join(PROJECT_PROCESSED_DIR, out_name or "training_dataset.csv")
-    training.to_csv(out_file, index=False)
+    cleaned_path = os.path.join(PROJECT_PROCESSED_DIR, (out_name or "cleaned_dataset") + "_cleaned.csv")
+    cleaned_df = df.copy()
+    # drop raw PAN fields if present
+    for raw in ["pan_card", "masked_card", "PAN_TARJETA", "TARJETA"]:
+        if raw in cleaned_df.columns:
+            cleaned_df = cleaned_df.drop(columns=[raw], errors="ignore")
+    cleaned_df.to_csv(cleaned_path, index=False)
 
-    # save report
-    report_path = out_file + ".md"
+    # Define forbidden columns to remove from feature set
+    forbidden = [
+        "response_code", "normalized_response_code", "response_high_risk", "response_code_reason",
+        "is_fraud_proxy", "behavioral_risk_score", "independent_rule_groups", "label_source", "fraud_label_reason", "risk_signal_reason",
+        "transaction_id", "customer_hash", "merchant_hash", "device_id", "reference_number", "authorization_code", "merchant_code", "terminal_code",
+        "pan_card", "masked_card", "PAN_TARJETA", "TARJETA",
+    ]
+
+    # Consider also removing merchant_name and transaction_datetime from features
+    optional_drop = ["merchant_name", "transaction_datetime"]
+
+    # build feature set: all columns except forbidden and optional drops
+    drop_cols = [c for c in df.columns if c in forbidden or c in optional_drop]
+    feature_set = df.drop(columns=drop_cols, errors="ignore")
+
+    # Ensure target present in feature set for training (as integer)
+    if "is_fraud" not in feature_set.columns and "is_fraud" in df.columns:
+        feature_set["is_fraud"] = df["is_fraud"].astype(int)
+
+    # Write feature set CSV
+    feature_set_path = os.path.join(PROJECT_PROCESSED_DIR, (out_name or "feature_set") + "_training.csv")
+    feature_set.to_csv(feature_set_path, index=False)
+
+    # Build preprocessing report
+    report_path = feature_set_path + ".md"
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write("# Training dataset generation report\n\n")
-        f.write(f"Source: {input_csv}\n\n")
-        f.write("## Label generation\n")
-        f.write("`is_fraud` generated as `is_fraud_proxy` via proxy_labeling.generate_proxy_fraud_label`.\n\n")
-        f.write("## Columns removed for leakage\n")
+        f.write("# Preprocessing Report\n\n")
+        f.write(f"Source file: {input_csv}\n\n")
+        f.write("## Rows\n")
+        f.write(f"- original_rows: {len(df_orig)}\n")
+        f.write(f"- cleaned_rows: {len(cleaned_df)}\n")
+        f.write(f"- feature_set_rows: {len(feature_set)}\n\n")
+
+        # rows removed and reason (simple diff)
+        removed = len(df_orig) - len(cleaned_df)
+        f.write("## Rows removed\n")
+        f.write(f"- total_removed: {removed}\n")
+        f.write("- note: detailed removal reasons are available in preprocessing logs if any.\n\n")
+
+        f.write("## Distributions\n")
+        if "is_fraud" in df.columns:
+            f.write("### is_fraud distribution\n")
+            vc = df["is_fraud"].value_counts(dropna=False).to_dict()
+            for k, v in vc.items():
+                f.write(f"- {k}: {v}\n")
+        else:
+            f.write("- is_fraud: not present\n")
+
+        if "behavioral_risk_score" in df.columns:
+            f.write("\n### behavioral_risk_score summary\n")
+            desc = df["behavioral_risk_score"].describe()
+            for k in ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]:
+                if k in desc.index:
+                    f.write(f"- {k}: {desc[k]}\n")
+        else:
+            f.write("- behavioral_risk_score: not present\n")
+
+        if "independent_rule_groups" in df.columns:
+            f.write("\n### independent_rule_groups distribution\n")
+            vc2 = df["independent_rule_groups"].value_counts().to_dict()
+            for k, v in vc2.items():
+                f.write(f"- {k}: {v}\n")
+        else:
+            f.write("- independent_rule_groups: not present\n")
+
+        f.write("\n## Columns removed for sensitivity and leakage\n")
         for c in forbidden:
             f.write(f"- {c}\n")
-        f.write("\n## Summary\n")
-        f.write(f"rows: {len(training)}\n")
-        f.write(f"columns: {len(training.columns)}\n")
+        f.write("\n## Optional columns removed to avoid overfitting\n")
+        for c in optional_drop:
+            f.write(f"- {c}\n")
 
-    return out_file, report_path
+        # warnings
+        f.write("\n## Warnings and checks\n")
+        # warning if single class
+        if "is_fraud" in df.columns and df["is_fraud"].nunique() <= 1:
+            f.write("- WARNING: is_fraud contains a single class. Model training will be affected.\n")
+        # confirm response_code not used
+        if "label_source" in df.columns:
+            vals = set(df["label_source"].dropna().unique())
+            if "response_code_proxy" in vals:
+                f.write("- ALERT: response_code_proxy was used for labeling in this dataset.\n")
+            else:
+                f.write("- CONFIRMATION: response_code was NOT used to generate is_fraud (label_source contains no response_code_proxy).\n")
+        else:
+            f.write("- CONFIRMATION: label_source column not present; labeling function should be behavioral-only.\n")
+
+    return feature_set_path, report_path

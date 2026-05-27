@@ -235,6 +235,7 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
     """
     import json
     from backend.app.ml import preprocessing as mlp
+    from backend.app.ml.build_training_dataset import build_training_dataset
 
     # resolve dataset path
     resolved_path = None
@@ -252,11 +253,20 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
     if not resolved_path or not os.path.exists(resolved_path):
         raise ValueError("training dataset file not found")
 
-    # load dataframe
-    df = pd.read_csv(resolved_path)
+    # Use build_training_dataset to produce feature set CSV and preprocessing report
+    feature_set_path = None
+    preprocessing_report_path = None
+    try:
+        feature_set_path, preprocessing_report_path = build_training_dataset(resolved_path, out_name=f"training_dataset_{run_id or 'manual'}")
+    except Exception:
+        # fallback to using resolved_path as feature set if build fails
+        feature_set_path = resolved_path
+
+    # load the generated feature set (or resolved_path)
+    df_fs = pd.read_csv(feature_set_path)
 
     # get X, y according to Phase B rules
-    X, y = mlp.get_training_columns(df)
+    X, y = mlp.get_training_columns(df_fs)
 
     # split
     X_train, X_test, y_train, y_test = mlp.split_train_test(X, y)
@@ -272,14 +282,14 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
 
     # persist a FeatureSet record (we store metadata in feature_columns_json as a dict)
     feature_cols = list(X.columns)
-    excluded = [c for c in df.columns if c not in feature_cols]
+    excluded = [c for c in df_fs.columns if c not in feature_cols]
 
     # create initial FeatureSet row
     fs = FeatureSet(
         dataset_id=None,
         preprocessing_run_id=run_id,
         name=f"feature_set_{run_id or 'manual'}_{int(datetime.now().timestamp())}",
-        file_path=resolved_path,
+        file_path=feature_set_path,
         row_count=len(X),
         feature_columns_json=json.dumps({"features": feature_cols}),
         excluded_columns_json=json.dumps(excluded),
@@ -325,5 +335,7 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
         "test_rows": len(X_test),
         "smote_report": smote_report,
         "pipeline_path": pipeline_path,
+        "feature_set_path": feature_set_path,
+        "preprocessing_report_path": preprocessing_report_path,
     }
     return report

@@ -91,12 +91,30 @@ export async function runPreprocessingTraining(runId){ return api.post('/preproc
 export async function previewFeatureSet(id, rows=10){ return api.get(`/feature_sets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
 export async function downloadFeatureSet(id){ return api.get(`/feature_sets/${id}/download`, { responseType: 'blob' }).then(r=> r.data) }
 export async function deleteFeatureSet(id){ return api.delete(`/feature_sets/${id}`).then(r=> r.data) }
+export async function downloadFeatureSetReport(id){ return api.get(`/feature_sets/${id}/report`, { responseType: 'blob' }).then(r=> r.data) }
 export async function listDatasets(params){ return api.get('/datasets', { params }).then(r=> r.data && r.data.datasets ? r.data.datasets : []) }
 export async function previewDataset(id, rows=10){ return api.get(`/datasets/${id}/preview`, { params: { rows } }).then(r=> r.data) }
 export async function deleteDataset(id){ return api.delete(`/datasets/${id}`).then(r=> r.data) }
 export async function listAlerts(){ return api.get('/alerts').then(r=> r.data && r.data.alerts ? r.data.alerts : []) }
 export async function listModels(){ return api.get('/models/results').then(r=> r.data && r.data.results ? r.data.results : []) }
+export async function getModelResults(){ return listModels() }
 export async function getModelConfig(){ return api.get('/settings/model-config').then(r=> r.data && r.data.model_config ? r.data.model_config : null) }
 export async function setModelConfig(payload){ return api.post('/settings/model-config', payload).then(r=> r.data && r.data.model_config ? r.data.model_config : null) }
+export async function saveModelConfig(payload){ return setModelConfig(payload) }
+export async function trainModel(payload){ return api.post('/models/train', payload).then(r=> r.data) }
+export async function activateModel(modelId){ return api.post(`/models/${modelId}/activate`).then(r=> r.data) }
+export async function exportModelResults(modelId){ return api.get(`/models/${modelId}/export`, { responseType: 'blob' }).then(r=> r.data) }
+export async function runBatchScoring(payload){ // payload: { transactions: [...], dataset_id? }
+  // map to existing alerts.generate endpoint
+  const transactions = payload && payload.transactions ? payload.transactions : []
+  return api.post('/alerts/generate', transactions).then(r=> r.data)
+}
+export async function getReportingSummary(){ return api.get('/reporting/summary').then(r=> r.data).catch(()=>null) }
+export async function getUsers(){ return api.get('/users').then(r=> r.data && r.data.users ? r.data.users : []) }
+export async function createUser(payload){ return api.post('/users', payload).then(r=> r.data) }
+export async function updateUser(id, payload){ return api.put(`/users/${id}`, payload).then(r=> r.data) }
+export async function toggleUserStatus(id){ return api.post(`/users/${id}/toggle-status`).then(r=> r.data) }
+export async function getAlerts(filters){ return api.get('/alerts', { params: filters }).then(r=> r.data && r.data.alerts ? r.data.alerts : []) }
+export async function updateAlertStatus(alertId, status){ return api.patch(`/alerts/${alertId}/status`, null, { params: { status } }).then(r=> r.data) }
 export async function me(){ return api.get('/auth/me').then(r=> r.data).catch(()=>null) }
 export default api

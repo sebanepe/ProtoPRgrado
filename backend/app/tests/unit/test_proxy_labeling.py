@@ -18,9 +18,9 @@ def test_normalize_response_code():
 def test_response_code_high_risk_labels():
     df = pd.DataFrame({'response_code': ['59', '43', '00']})
     df = generate_proxy_fraud_label(df)
-    # Códigos de respuesta de alto riesgo deben marcar como fraude proxy
-    assert df.iloc[0]['is_fraud'] == 1  # '59' => bandera de fraude por respuesta
-    assert df.iloc[1]['is_fraud'] == 1  # '43' => bandera de fraude por respuesta
+    # Códigos de respuesta de alto riesgo NO deben marcar como fraude (behavioral-only)
+    assert df.iloc[0]['is_fraud'] == 0  # '59' => no fuerza etiqueta
+    assert df.iloc[1]['is_fraud'] == 0  # '43' => no fuerza etiqueta
     assert df.iloc[2]['is_fraud'] == 0  # '00' => no debe marcar fraude
 
 

@@ -43,6 +43,20 @@ def download_feature_set(fs_id: int, db: Session = Depends(get_db), _auth=Depend
     return FileResponse(path=fs.file_path, filename=os.path.basename(fs.file_path), media_type='text/csv')
 
 
+@router.get("/{fs_id}/report")
+def download_feature_set_report(fs_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    fs = db.query(FeatureSet).filter(FeatureSet.id == fs_id).first()
+    if not fs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feature_set not found")
+    # report expected to be feature_set file + .md
+    if not fs.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feature set file not found")
+    report_path = fs.file_path + ".md"
+    if not os.path.exists(report_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report file not found")
+    return FileResponse(path=report_path, filename=os.path.basename(report_path), media_type='text/markdown')
+
+
 @router.delete("/{fs_id}")
 def delete_feature_set(fs_id: int, db: Session = Depends(get_db), user=Depends(get_user_from_header), request: Request = None, _auth=Depends(require_permission("preprocess"))):
     fs = db.query(FeatureSet).filter(FeatureSet.id == fs_id).first()

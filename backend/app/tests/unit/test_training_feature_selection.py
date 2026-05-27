@@ -16,9 +16,9 @@ def test_build_training_dataset_removes_sensitive_columns(tmp_path):
     assert os.path.exists(out_file)  # verifica que se escribió CSV de entrenamiento
     train = pd.read_csv(out_file)
     # Las columnas sensibles no deben aparecer en las features de entrenamiento
-    for forbidden in ["response_code", "normalized_response_code", "response_high_risk", "is_fraud", "is_fraud_proxy", "behavioral_risk_score", "independent_rule_groups"]:
+    for forbidden in ["response_code", "normalized_response_code", "response_high_risk", "is_fraud_proxy", "behavioral_risk_score", "independent_rule_groups"]:
         assert forbidden not in train.columns  # evita fugas de información
-    # Confirmación adicional: 'is_fraud' no debe estar entre las columnas
-    assert 'is_fraud' not in train.columns  # etiqueta removida de features
+    # Confirmación adicional: 'is_fraud' debe estar presente como objetivo para entrenamiento
+    assert 'is_fraud' in train.columns
     # El reporte debe existir
     assert os.path.exists(report)  # comprueba que se generó el informe

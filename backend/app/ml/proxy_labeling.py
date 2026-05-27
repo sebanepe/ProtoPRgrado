@@ -1,3 +1,5 @@
+import os
+import warnings
 import pandas as pd
 import numpy as np
 from typing import List
@@ -48,6 +50,33 @@ def generate_response_code_signal(df: pd.DataFrame) -> pd.DataFrame:
 
     df["response_code_reason"] = df["normalized_response_code"].apply(reason_for)
     return df
+
+
+BEHAVIORAL_RISK_THRESHOLD = float(os.getenv("BEHAVIORAL_RISK_THRESHOLD", "0.60"))
+MIN_INDEPENDENT_RULE_GROUPS = int(os.getenv("MIN_INDEPENDENT_RULE_GROUPS", "3"))
+
+
+def _infer_card_brand_from_masked(masked_card: str) -> str:
+    try:
+        if not masked_card or pd.isna(masked_card):
+            return None
+        s = str(masked_card).strip()
+        # look for leading digit
+        for ch in s:
+            if ch.isdigit():
+                d = ch
+                break
+        else:
+            return None
+        if d == '4':
+            return 'VISA'
+        if d == '5':
+            return 'MASTERCARD'
+        if d == '6':
+            return 'DISCOVER'
+        return 'UNKNOWN'
+    except Exception:
+        return None
 
 
 def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float = 1000.0) -> pd.DataFrame:
@@ -146,19 +175,24 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
 
     # merchant / brand / product heuristics
     df["card_brand"] = df.get("card_brand", None)
+    # infer brand from masked_card when missing
+    if ("card_brand" not in df.columns) or df["card_brand"].isna().all():
+        if "masked_card" in df.columns:
+            df["card_brand"] = df["masked_card"].apply(_infer_card_brand_from_masked)
     df["card_product_proxy"] = df.get("card_product_proxy", None)
-    df["_brand_customers_merchant_day"] = df.groupby(["merchant_hash", "card_brand", "_day_bucket"])["customer_hash"].transform(lambda x: x.nunique())
+    if ("card_product_proxy" not in df.columns) or df["card_product_proxy"].isna().all():
+        df["card_product_proxy"] = pd.Series(["UNKNOWN"] * len(df), index=df.index)
+    df["_brand_customers_merchant_day"] = df.groupby(["merchant_hash", "card_brand", "_day_bucket"]) ["customer_hash"].transform(lambda x: x.nunique())
     df["feature_same_merchant_15_cards_by_brand"] = (df["_brand_customers_merchant_day"] >= 15).astype(int)
 
-    df["_product_customers_merchant_day"] = df.groupby(["merchant_hash", "card_product_proxy", "card_presence_type", "_day_bucket"])["customer_hash"].transform(lambda x: x.nunique())
+    df["_product_customers_merchant_day"] = df.groupby(["merchant_hash", "card_product_proxy", "card_presence_type", "_day_bucket"]) ["customer_hash"].transform(lambda x: x.nunique())
     df["feature_same_merchant_20_cards_by_product_presence"] = (df["_product_customers_merchant_day"] >= 20).astype(int)
 
     # TNP 50 approved by product — approximate: count TNP transactions per product per day
-    # TNP 50 approved by product — count TNP transactions per product per day
     df["_tnp_product_day"] = 0
     mask_tnp = df["card_presence_type"] == "TNP"
     if mask_tnp.any():
-        df.loc[mask_tnp, "_tnp_product_day"] = df.loc[mask_tnp].groupby(["card_product_proxy", "_day_bucket"])["transaction_datetime"].transform("count")
+        df.loc[mask_tnp, "_tnp_product_day"] = df.loc[mask_tnp].groupby(["card_product_proxy", "_day_bucket"]) ["transaction_datetime"].transform("count")
     df["feature_tnp_50_approved_by_product"] = (df["_tnp_product_day"] >= 50).astype(int)
 
     # cleanup helper columns
@@ -227,20 +261,10 @@ def calculate_independent_rule_groups(df: pd.DataFrame) -> pd.Series:
     return counts
 
 
-def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.0, behavioral_threshold: float = 0.6) -> pd.DataFrame:
+def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.0, behavioral_threshold: float | None = None, min_independent_groups: int | None = None) -> pd.DataFrame:
     df = df.copy()
     # generate behavioral features (this will add required binary rule columns)
     df = generate_behavioral_risk_features(df, amount_threshold=amount_threshold)
-
-    # incorporate response_code high-risk signals as an immediate proxy label
-    try:
-        df = generate_response_code_signal(df)
-        # if response_high_risk present, force proxy label
-        if "response_high_risk" in df.columns:
-            df.loc[df["response_high_risk"] == 1, "is_fraud_proxy"] = 1
-    except Exception:
-        # ignore if response code handling fails
-        pass
 
     # behavioral score and independent groups
     df["behavioral_risk_score"] = calculate_behavioral_risk_score(df)
@@ -272,14 +296,25 @@ def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.
 
     df["risk_signal_reason"] = df.apply(make_risk_signal_reason, axis=1)
 
+    # use configured thresholds if not provided
+    if behavioral_threshold is None:
+        behavioral_threshold = BEHAVIORAL_RISK_THRESHOLD
+    if min_independent_groups is None:
+        min_independent_groups = MIN_INDEPENDENT_RULE_GROUPS
+
     # decide proxy label purely from behavioral signals
     def decide(row):
-        if float(row.get("behavioral_risk_score", 0)) >= behavioral_threshold and int(row.get("independent_rule_groups", 0)) >= 3:
+        try:
+            br = float(row.get("behavioral_risk_score", 0))
+        except Exception:
+            br = 0.0
+        irg = int(row.get("independent_rule_groups", 0)) if row.get("independent_rule_groups", None) is not None else 0
+        if br >= float(behavioral_threshold) and irg >= int(min_independent_groups):
             return 1
         return 0
 
     df["is_fraud_proxy"] = df.apply(decide, axis=1).astype(int)
-    df["is_fraud"] = df["is_fraud_proxy"]
+    df["is_fraud"] = df["is_fraud_proxy"].astype(int)
 
     # fraud_label_reason only when positive
     def make_fraud_label_reason(row):
@@ -289,18 +324,14 @@ def generate_proxy_fraud_label(df: pd.DataFrame, amount_threshold: float = 1000.
 
     df["fraud_label_reason"] = df.apply(make_fraud_label_reason, axis=1)
 
-    # label_source
+    # label_source: behavioral or not detected
     df["label_source"] = df["is_fraud"].apply(lambda x: "behavioral_weak_label" if int(x) == 1 else "no_proxy_risk_detected")
 
-    # If response code indicates high risk, override and mark as proxy fraud
+    # warn if no positives found for this labeling configuration
     try:
-        if "response_high_risk" in df.columns and "response_code_reason" in df.columns:
-            mask_resp = df["response_high_risk"] == 1
-            if mask_resp.any():
-                df.loc[mask_resp, "is_fraud_proxy"] = 1
-                df.loc[mask_resp, "is_fraud"] = 1
-                df.loc[mask_resp, "fraud_label_reason"] = df.loc[mask_resp, "response_code_reason"].fillna("RESPONSE_CODE_HIGH_RISK")
-                df.loc[mask_resp, "label_source"] = "response_code_proxy"
+        positives = int(df["is_fraud"].sum())
+        if positives == 0:
+            warnings.warn("generate_proxy_fraud_label: no positives found under current thresholds; check BEHAVIORAL_RISK_THRESHOLD and dataset size.")
     except Exception:
         pass
 

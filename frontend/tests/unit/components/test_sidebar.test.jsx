@@ -13,6 +13,7 @@ describe('Sidebar component', () => {
     )
     // Sidebar contains a link to Dashboard (or 'Panel' in Spanish) by default
     // verifica que exista el enlace al panel/dashboard
-    expect(screen.getByText(/Dashboard|Panel/i)).toBeTruthy()
+    const matches = screen.getAllByText(/Dashboard|Panel/i)
+    expect(matches.length).toBeGreaterThan(0)
   })
 })

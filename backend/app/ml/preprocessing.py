@@ -420,7 +420,11 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
 
 def save_processed(df: pd.DataFrame, output_path: str):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_csv(output_path, index=False)
+    # do not persist diagnostic/scaled columns
+    df_to_save = df.copy()
+    if "amount_scaled" in df_to_save.columns:
+        df_to_save = df_to_save.drop(columns=["amount_scaled"], errors="ignore")
+    df_to_save.to_csv(output_path, index=False)
 
 
 def get_training_columns(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:

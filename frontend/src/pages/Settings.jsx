@@ -18,6 +18,11 @@ export default function Settings(){
   },[])
 
   const save = async ()=>{
+    // validate threshold
+    if (form.alert_threshold < 0 || form.alert_threshold > 1) {
+      alert('Umbral debe estar entre 0 y 1')
+      return
+    }
     const payload = { ...form }
     const res = await setModelConfig(payload)
     setConfig(res)

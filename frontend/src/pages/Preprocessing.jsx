@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react'
-import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun, runPreprocessingTraining, previewFeatureSet, downloadFeatureSet, deleteFeatureSet } from '../services/api'
+import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun, runPreprocessingTraining, previewFeatureSet, downloadFeatureSet, deleteFeatureSet, downloadFeatureSetReport } from '../services/api'
 
 export default function Preprocessing(){
   const [msg,setMsg] = useState('')
@@ -167,6 +167,20 @@ export default function Preprocessing(){
     }catch(e){ alert('Error descargando el CSV: ' + (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
+  const handleDownloadFeatureSetReport = async (id) => {
+    try{
+      const blob = await downloadFeatureSetReport(id)
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/markdown' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `feature_set_${id}_preprocessing_report.md`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    }catch(e){ alert('Error descargando el informe: ' + (e?.response?.data?.detail || e?.message || String(e))) }
+  }
+
   const handleDeleteFeatureSet = async (id)=>{
     if(!window.confirm('¿Borrar feature set #' + id + '?')) return
     try{
@@ -312,9 +326,10 @@ export default function Preprocessing(){
           <h3>Datos preparados para entrenamiento</h3>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <div>Feature set id: <strong>{createdFeatureSet.id}</strong></div>
-            <div style={{display:'flex',gap:8}}>
+              <div style={{display:'flex',gap:8}}>
               <button className="button" onClick={()=>handlePreviewFeatureSet(createdFeatureSet.id)}>Previsualizar</button>
               <button className="button" onClick={()=>handleDownloadFeatureSet(createdFeatureSet.id)}>Descargar CSV</button>
+              <button className="button" onClick={()=>handleDownloadFeatureSetReport(createdFeatureSet.id)}>Descargar informe</button>
               <button className="button danger" onClick={()=>handleDeleteFeatureSet(createdFeatureSet.id)}>Borrar</button>
             </div>
           </div>
