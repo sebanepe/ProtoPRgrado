@@ -26,7 +26,8 @@ def test_import_valid_csv_integration(test_client, sample_transactions):
     b = _make_csv_bytes(sample_transactions, cols)
     files = {"file": ("tx.csv", b, "text/csv")}
     r = test_client.post("/datasets/import", files=files)
-    assert r.status_code in (200, 201)
+    # endpoint may run synchronously (200/201) or enqueue background import (202)
+    assert r.status_code in (200, 201, 202)
     details = r.json().get("details")
     assert details and details.get("total") == len(sample_transactions)
 

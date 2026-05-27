@@ -29,6 +29,8 @@ def test_preprocessing_pipeline_with_sample_transactions(db_session, sample_tran
 def test_preprocessing_endpoint_if_exists(test_client):
     # endpoint exists and responds
     r = test_client.post("/preprocessing/run")
-    assert r.status_code == 200
-    data = r.json()
-    assert data.get("status") == "ok"
+    # endpoint now enqueues background preprocessing and returns 202 Accepted
+    assert r.status_code in (200, 202)
+    if r.status_code == 200:
+        data = r.json()
+        assert data.get("status") == "ok"

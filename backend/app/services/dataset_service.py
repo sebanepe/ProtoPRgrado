@@ -3,9 +3,10 @@ import logging
 import time
 import json
 import uuid
-from typing import BinaryIO, List, Dict
+from typing import BinaryIO, List, Dict, Optional
 from backend.app.repositories import transaction_repository, dataset_repository
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 from io import BytesIO
 import os
 from datetime import datetime
@@ -296,13 +297,20 @@ def import_dataset(db: Session, file, name: str, file_name: str):
     return {'dataset': dataset, 'inserted': num_inserted, 'total': total, 'valid': num_inserted, 'invalid': invalid_count}
 
 
-def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_name: str):
+def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_name: str, db_bind: Optional[object] = None):
     """Background worker variant: open a new DB session and process the CSV at dest_path,
     updating the dataset record identified by dataset_id. This can be scheduled via
     FastAPI BackgroundTasks so the HTTP request returns immediately after the file is saved.
     """
-    from backend.app.database import SessionLocal
-    db = SessionLocal()
+    # Create a DB session. Prefer a provided bind (from the request/session) so
+    # background tasks use the same engine as the web app/test harness. If no
+    # bind is provided, fall back to the application SessionLocal.
+    if db_bind is None:
+        from backend.app.database import SessionLocal
+        db = SessionLocal()
+    else:
+        SessionLocalLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_bind)
+        db = SessionLocalLocal()
     try:
         logger = logging.getLogger(__name__)
         # mark dataset as processing and set started_at

@@ -27,19 +27,34 @@ def insert_transactions(db: Session, records: List[Dict], dataset_id: int | None
     # unique index/constraint, fall back to safe batched/per-row insert logic.
     batch_size = 1000
     try:
-        for i in range(0, len(records), batch_size):
-            batch = records[i:i+batch_size]
-            stmt = pg_insert(Transaction.__table__).values(batch)
-            # conflict target is transaction_id + dataset_id (behavioral grouping)
-            stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id", "dataset_id"])
-            db.execute(stmt)
-        db.commit()
-        return len(records)
+        # Use Postgres-specific ON CONFLICT only when the DB dialect is Postgres.
+        # In test environments (SQLite) the ON CONFLICT clause above may reference
+        # a non-existent unique constraint and raise an OperationalError. Detect
+        # dialect and avoid using the pg_insert path for non-postgres DBs.
+        try:
+            bind = db.get_bind()
+            dialect_name = getattr(getattr(bind, 'dialect', None), 'name', '')
+        except Exception:
+            dialect_name = ''
+
+        if dialect_name == 'postgresql':
+            for i in range(0, len(records), batch_size):
+                batch = records[i:i+batch_size]
+                stmt = pg_insert(Transaction.__table__).values(batch)
+                # conflict target is transaction_id + dataset_id (behavioral grouping)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id", "dataset_id"])
+                db.execute(stmt)
+            db.commit()
+            return len(records)
+        # otherwise fall through to conservative fallback below
     except SQLAlchemyError as e:
         # If ON CONFLICT failed because the unique index doesn't exist, or any
         # other SQLAlchemy error, log and rollback then try conservative fallback.
         logger.warning("ON CONFLICT bulk insert failed, falling back to safe inserts: %s", e)
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
     # Conservative fallback: batched inserts, and per-row on failure.
     inserted = 0

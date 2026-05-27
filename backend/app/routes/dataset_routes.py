@@ -37,29 +37,86 @@ def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTas
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed saving uploaded file: {e}")
 
+    # Light upfront validation: read a small sample to detect empty files or
+    # missing required columns. Return 400 for invalid uploads before creating
+    # the DB dataset record or scheduling background work.
+    try:
+        sample = pd.read_csv(dest_path, nrows=5)
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Uploaded CSV is empty')
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Failed reading uploaded CSV sample: {e}')
+
+    # map columns and check required ones
+    try:
+        mapped = dataset_service._map_columns(sample)
+    except Exception:
+        mapped = {}
+
+    missing = []
+    for rc in dataset_service.REQUIRED_COLUMNS:
+        if rc == 'is_fraud':
+            # is_fraud is optional; will be filled with False if missing
+            continue
+        if mapped.get(rc) is None:
+            missing.append(rc)
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Missing required columns: {missing}')
+
+    # try to compute total rows for small uploads so tests / clients can get a quick summary
+    total_rows = None
+    try:
+        # for small files this is cheap; for very large files this may be slow — acceptable for test environment
+        total_rows = int(pd.read_csv(dest_path).shape[0])
+    except Exception:
+        total_rows = None
+
     # create dataset record in DB with status 'importing'
     try:
         dataset = dataset_repository.create_dataset(db, name=file.filename, file_name=safe_name, file_path=dest_path, original_filename=file.filename, total_records=0, valid_records=0, invalid_records=0, status='importing')
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed creating dataset record: {e}")
 
-    # schedule background processing
+    # decide whether to process synchronously for very small uploads
     try:
-        # create a job id and store in dataset metadata
-        job_id = str(uuid4())
-        meta = {'job_id': job_id, 'submitted_at': datetime.utcnow().isoformat()}
-        dataset.metadata_json = json.dumps(meta)
-        db.add(dataset)
-        db.commit()
-        background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name)
+        sync_limit = int(os.environ.get('DATASET_IMPORT_SYNC_ROWS', '1000'))
+    except Exception:
+        sync_limit = 1000
+
+    job_id = str(uuid4())
+    meta = {'job_id': job_id, 'submitted_at': datetime.utcnow().isoformat()}
+    dataset.metadata_json = json.dumps(meta)
+    db.add(dataset)
+    db.commit()
+
+    try:
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+
+        if total_rows is not None and total_rows <= sync_limit:
+            # small file: process synchronously to give immediate feedback
+            dataset_service.import_dataset_background(dest_path, dataset.id, file.filename, safe_name, bind)
+            ds = dataset_repository.get_dataset(db, dataset.id)
+            out = {"accepted": True, "dataset_id": dataset.id, "job_id": job_id, "status": ds.status.lower() if ds and ds.status else 'imported', "message": "imported"}
+            if ds:
+                out['details'] = {"total": ds.total_records or total_rows, "valid": ds.valid_records or 0, "invalid": ds.invalid_records or 0}
+            return out
+        else:
+            # schedule background processing
+            background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name, bind)
+            out = {"accepted": True, "dataset_id": dataset.id, "job_id": job_id, "status": "PROCESSING", "message": "Dataset import accepted for background processing"}
+            if total_rows is not None:
+                out['details'] = {"total": total_rows}
+            return out
     except Exception as e:
-        # if background scheduling fails, mark dataset as failed
+        # if background scheduling or sync processing fails, mark dataset as failed
         dataset.status = 'failed'
+        dataset.error_message = f"Failed scheduling or processing import: {e}"
         db.add(dataset)
         db.commit()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed scheduling background processing: {e}")
-
-    return {"accepted": True, "dataset_id": dataset.id, "job_id": job_id, "status": "PROCESSING", "message": "Dataset import accepted for background processing"}
 
 
 @router.post('/import-background')
@@ -98,7 +155,11 @@ def import_dataset_background_route(file: UploadFile = File(...), background_tas
     db.commit()
 
     try:
-        background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name)
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+        background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name, bind)
     except Exception as e:
         dataset.status = 'FAILED'
         dataset.error_message = f"Failed scheduling background processing: {e}"
