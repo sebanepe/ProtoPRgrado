@@ -76,13 +76,15 @@ def build_training_dataset(
     dataset_id: Optional[int] = None,
     chunksize: int = 25000,
     out_name: Optional[str] = None,
+    out_dir: Optional[str] = None,
 ):
-    os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
+    project_dir = out_dir or PROJECT_PROCESSED_DIR
+    os.makedirs(project_dir, exist_ok=True)
 
     run_tag = f"dataset_{dataset_id}" if dataset_id else (out_name or "csv")
-    cleaned_path = os.path.join(PROJECT_PROCESSED_DIR, f"cleaned_{run_tag}.csv")
-    feature_path = os.path.join(PROJECT_PROCESSED_DIR, f"feature_set_{run_tag}.csv")
-    report_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessing_report_{run_tag}.md")
+    cleaned_path = os.path.join(project_dir, f"cleaned_{run_tag}.csv")
+    feature_path = os.path.join(project_dir, f"feature_set_{run_tag}.csv")
+    report_path = os.path.join(project_dir, f"preprocessing_report_{run_tag}.md")
 
     # Prepare: if dataset_id provided, validate
     total_rows = None
@@ -148,7 +150,8 @@ def build_training_dataset(
                 df_chunk = normalize_columns(df_chunk)
                 if "transaction_id" not in df_chunk.columns:
                     df_chunk["transaction_id"] = df_chunk.apply(deterministic_transaction_id, axis=1)
-                if ("is_fraud" not in df_chunk.columns) or ("behavioral_risk_score" not in df_chunk.columns):
+                # only generate proxy labels when `is_fraud` is not present
+                if ("is_fraud" not in df_chunk.columns) and ("behavioral_risk_score" not in df_chunk.columns):
                     try:
                         df_chunk = generate_proxy_fraud_label(df_chunk)
                     except Exception:
@@ -167,7 +170,8 @@ def build_training_dataset(
             df_chunk = normalize_columns(df_chunk)
             if "transaction_id" not in df_chunk.columns:
                 df_chunk["transaction_id"] = df_chunk.apply(deterministic_transaction_id, axis=1)
-            if ("is_fraud" not in df_chunk.columns) or ("behavioral_risk_score" not in df_chunk.columns):
+            # only generate proxy labels when `is_fraud` is not present
+            if ("is_fraud" not in df_chunk.columns) and ("behavioral_risk_score" not in df_chunk.columns):
                 try:
                     df_chunk = generate_proxy_fraud_label(df_chunk)
                 except Exception:
@@ -234,6 +238,32 @@ def build_training_dataset(
         for c in optional_drop:
             f.write(f"- {c}\n")
         f.write("\n## Warnings and checks\n")
+        # detect whether response_code or label_source were present/used in source
+        try:
+            if input_csv and os.path.exists(input_csv):
+                hdr = pd.read_csv(input_csv, nrows=20)
+                if 'label_source' in hdr.columns:
+                    if hdr['label_source'].astype(str).str.contains('response_code_proxy', na=False).any():
+                        f.write("- ALERT: response_code_proxy was used in labeling.\n")
+                    else:
+                        f.write("- CONFIRMATION: response_code was NOT used based on label_source values.\n")
+                else:
+                    f.write("- INFO: label_source column not present in source file.\n")
+            else:
+                # fallback: check cleaned file
+                try:
+                    hdr2 = pd.read_csv(cleaned_path, nrows=20)
+                    if 'label_source' in hdr2.columns:
+                        if hdr2['label_source'].astype(str).str.contains('response_code_proxy', na=False).any():
+                            f.write("- ALERT: response_code_proxy was used in labeling.\n")
+                        else:
+                            f.write("- CONFIRMATION: response_code was NOT used based on label_source values.\n")
+                    else:
+                        f.write("- INFO: label_source column not present in cleaned data.\n")
+                except Exception:
+                    f.write("- INFO: label_source presence could not be determined.\n")
+        except Exception:
+            f.write("- INFO: label_source presence could not be determined.\n")
         f.write("- CONFIRMATION: SMOTE was NOT applied in preprocessing.\n")
         f.write("- CONFIRMATION: OneHotEncoding was NOT applied in preprocessing.\n")
 
