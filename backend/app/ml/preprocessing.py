@@ -244,14 +244,51 @@ def generate_anonymized_keys(df: pd.DataFrame) -> pd.DataFrame:
 
     # transaction_id
     if "transaction_id" not in df.columns:
-        df["transaction_id"] = [sha_prefix(str(i) + str(row.get('transaction_datetime','')), 'tx') for i, row in df.iterrows()]
+        # deterministically generate transaction_id from stable fields to ensure reproducible deduplication
+        def make_tid(row):
+            components = [
+                str(row.get('transaction_datetime', '')),
+                str(row.get('amount', '')),
+                str(row.get('customer_hash', '')),
+                str(row.get('merchant_hash', '')),
+                str(row.get('reference_number', '')),
+                str(row.get('authorization_code', '')),
+            ]
+            key = "|".join([c if c is not None else '' for c in components])
+            return sha_prefix(key, 'tx')
+
+        df["transaction_id"] = [make_tid(row) for _, row in df.iterrows()]
 
     # customer_hash
+    # customer_hash: if missing, derive from masked_card/pan_card; if present but looks like raw PAN, re-hash
     if "customer_hash" not in df.columns:
         if "masked_card" in df.columns:
             df["customer_hash"] = df["masked_card"].apply(lambda x: sha_prefix(x, 'cust') if pd.notna(x) else None)
         elif "pan_card" in df.columns:
             df["customer_hash"] = df["pan_card"].apply(lambda x: sha_prefix(x, 'cust') if pd.notna(x) else None)
+    else:
+        # sanitize existing customer_hash values that look like raw PAN (all digits, length>=12)
+        def sanitize_customer(val, pan_val=None):
+            try:
+                if pd.isna(val) or val == '':
+                    return None
+                s = str(val).strip()
+                if s.startswith('cust_'):
+                    return s
+                # if looks like PAN (digits >=12) or contains spaces/dashes and mostly digits
+                digits = ''.join(ch for ch in s if ch.isdigit())
+                if len(digits) >= 12 and (digits == s or len(digits) / len(s) > 0.7):
+                    # prefer to hash PAN if provided as raw; use pan_val if available else s
+                    raw = pan_val if pan_val is not None and not pd.isna(pan_val) else s
+                    return sha_prefix(raw, 'cust')
+                return s
+            except Exception:
+                return val
+
+        if 'pan_card' in df.columns:
+            df['customer_hash'] = df.apply(lambda r: sanitize_customer(r.get('customer_hash'), r.get('pan_card')), axis=1)
+        else:
+            df['customer_hash'] = df['customer_hash'].apply(lambda v: sanitize_customer(v, None))
 
     # merchant_hash
     if "merchant_hash" not in df.columns:
@@ -261,6 +298,25 @@ def generate_anonymized_keys(df: pd.DataFrame) -> pd.DataFrame:
             df["merchant_hash"] = df["merchant_name"].apply(lambda x: sha_prefix(x, 'merch') if pd.notna(x) else 'UNKNOWN_MERCHANT')
         else:
             df["merchant_hash"] = 'UNKNOWN_MERCHANT'
+    else:
+        # sanitize merchant_hash if raw code provided
+        def sanitize_merchant(val, code_val=None, name_val=None):
+            try:
+                if pd.isna(val) or val == '':
+                    if code_val is not None and not pd.isna(code_val):
+                        return sha_prefix(code_val, 'merch')
+                    if name_val is not None and not pd.isna(name_val):
+                        return sha_prefix(name_val, 'merch')
+                    return 'UNKNOWN_MERCHANT'
+                s = str(val).strip()
+                if s.startswith('merch_'):
+                    return s
+                # if looks like a code (mostly digits/letters short), hash it
+                return sha_prefix(s, 'merch')
+            except Exception:
+                return val
+
+        df['merchant_hash'] = df.apply(lambda r: sanitize_merchant(r.get('merchant_hash'), r.get('merchant_code'), r.get('merchant_name')), axis=1)
 
     # device_id from terminal_code
     if "device_id" not in df.columns and "terminal_code" in df.columns:
@@ -395,6 +451,13 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
         # if behavioral features fail, ensure flow continues
         pass
 
+    # Ensure is_international column aligns with the computed feature
+    try:
+        if "feature_international_transaction" in df.columns:
+            df["is_international"] = df["feature_international_transaction"].astype(int)
+    except Exception:
+        pass
+
     # Calculate behavioral score and independent groups for diagnostics
     try:
         df["behavioral_risk_score"] = proxy_labeling.calculate_behavioral_risk_score(df)
@@ -402,6 +465,22 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
     except Exception:
         df["behavioral_risk_score"] = 0.0
         df["independent_rule_groups"] = 0
+
+    # compute feature frequencies for reporting: count and percent for each feature_
+    try:
+        total_rows = len(df)
+        feature_freq = {}
+        for c in df.columns:
+            if c.startswith("feature_"):
+                ones = int(df[c].fillna(0).astype(int).sum())
+                pct = (ones / total_rows) * 100 if total_rows > 0 else 0.0
+                feature_freq[c] = {"count": ones, "percent": round(pct, 4)}
+        summary["feature_frequencies"] = feature_freq
+        # mark features that exceed 30%
+        summary["features_above_30pct"] = [f for f, v in feature_freq.items() if v["percent"] > 30.0]
+    except Exception:
+        summary["feature_frequencies"] = {}
+        summary["features_above_30pct"] = []
 
     # Generate proxy weak label but do NOT use response codes
     try:
@@ -473,6 +552,16 @@ def get_training_columns(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         "reference_number",
         "numero_referencia",
     }
+
+    # Ensure we drop explicit leakage / label columns per requirement
+    extra_exclude = {
+        'response_code', 'normalized_response_code', 'response_high_risk', 'response_code_reason',
+        'is_fraud_proxy', 'behavioral_risk_score', 'independent_rule_groups', 'label_source',
+        'fraud_label_reason', 'risk_signal_reason', 'transaction_id', 'customer_hash', 'merchant_hash',
+        'device_id', 'reference_number', 'authorization_code', 'merchant_code', 'terminal_code',
+        'pan_card', 'masked_card', 'PAN_TARJETA', 'TARJETA', 'merchant_name', 'transaction_datetime'
+    }
+    exclude = exclude.union(extra_exclude)
 
     exclude = exclude.union(sensitive)
 
@@ -551,13 +640,9 @@ def build_preprocessing_pipeline(X: pd.DataFrame):
     transformers = []
     if numeric_cols:
         transformers.append(("num", StandardScaler(), numeric_cols))
-    if cat_cols:
-        # sklearn API changed from `sparse` to `sparse_output` in newer versions
-        try:
-            ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-        except TypeError:
-            ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)
-        transformers.append(("cat", ohe, cat_cols))
+    # Do NOT apply OneHotEncoding at preprocessing stage to avoid exploding columns.
+    # OneHotEncoding will be applied inside the training pipeline after train/test split.
+    # Therefore we skip categorical transformers here and only keep numeric/boolean handling.
     if bool_cols:
         # convert boolean-like to int
         transformers.append(("bool", Pipeline([("to_int", FunctionTransformer(lambda x: x.astype(int), validate=False))]), bool_cols))

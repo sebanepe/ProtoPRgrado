@@ -294,6 +294,23 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
         # fallback to using resolved_path as feature set if build fails
         feature_set_path = resolved_path
 
+    # Validate generated feature set before proceeding to training
+    try:
+        from backend.app.ml import validate_feature_set
+        vreport = validate_feature_set.validate(feature_set_path)
+        if vreport.get("verdict") != "READY_FOR_SUPERVISED_TRAINING":
+            # return a clear report instead of attempting to train on an invalid feature set
+            return {
+                "feature_set_id": None,
+                "feature_set_path": feature_set_path,
+                "preprocessing_report_path": preprocessing_report_path,
+                "ready": False,
+                "validation": vreport,
+            }
+    except Exception:
+        # if validation fails unexpectedly, abort to avoid training on bad data
+        raise
+
     # load the generated feature set (or resolved_path)
     df_fs = pd.read_csv(feature_set_path)
 
@@ -312,52 +329,57 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
     if apply_smote:
         X_train_res, y_train_res, smote_report = mlp.apply_smote_if_needed(X_train, y_train)
 
+    # Fit the pipeline BEFORE persisting metadata to DB to avoid holding DB transactions
+    pipeline_path = None
+    try:
+        try:
+            pipeline.fit(X_train_res)
+        except Exception:
+            pipeline.fit(X)
+        os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
+    except Exception:
+        # fitting failed but we'll still persist metadata without pipeline
+        pass
+
     # persist a FeatureSet record (we store metadata in feature_columns_json as a dict)
     feature_cols = list(X.columns)
     excluded = [c for c in df_fs.columns if c not in feature_cols]
 
-    # create initial FeatureSet row
-    fs = FeatureSet(
-        dataset_id=None,
-        preprocessing_run_id=run_id,
-        name=f"feature_set_{run_id or 'manual'}_{int(datetime.now().timestamp())}",
-        file_path=feature_set_path,
-        row_count=len(X),
-        feature_columns_json=json.dumps({"features": feature_cols}),
-        excluded_columns_json=json.dumps(excluded),
-    )
-    db.add(fs)
-    db.commit()
-    db.refresh(fs)
-
-    # Fit and persist the preprocessing pipeline (pickle)
+    # create initial FeatureSet row using a new short-lived DB session
+    local_db = SessionLocal()
     try:
-        # fit pipeline on training features (after any SMOTE)
+        fs = FeatureSet(
+            dataset_id=None,
+            preprocessing_run_id=run_id,
+            name=f"feature_set_{run_id or 'manual'}_{int(datetime.now().timestamp())}",
+            file_path=feature_set_path,
+            row_count=len(X),
+            feature_columns_json=json.dumps({"features": feature_cols}),
+            excluded_columns_json=json.dumps(excluded),
+        )
+        local_db.add(fs)
+        local_db.commit()
+        local_db.refresh(fs)
+
+        # persist fitted pipeline to disk referencing fs.id (if fit succeeded)
         try:
-            pipeline.fit(X_train_res)
+            import pickle
+            pipeline_path = os.path.join(PROJECT_PROCESSED_DIR, f"pipeline_feature_set_{fs.id}.pkl")
+            with open(pipeline_path, "wb") as f:
+                pickle.dump(pipeline, f)
+            fs.pipeline_path = pipeline_path
         except Exception:
-            # fallback: fit on full X
-            pipeline.fit(X)
-        os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
-        pipeline_path = os.path.join(PROJECT_PROCESSED_DIR, f"pipeline_feature_set_{fs.id}.pkl")
-        import pickle
-        with open(pipeline_path, "wb") as f:
-            pickle.dump(pipeline, f)
-    except Exception:
-        pipeline_path = None
+            fs.pipeline_path = None
 
-    # update feature set with pipeline path and smote report stored in dedicated columns
-    try:
-        fs.pipeline_path = pipeline_path
         fs.smote_report_json = json.dumps(smote_report) if smote_report is not None else None
         # keep legacy metadata too
         meta = {"features": feature_cols}
         fs.feature_columns_json = json.dumps(meta)
-    except Exception:
-        pass
-    db.add(fs)
-    db.commit()
-    db.refresh(fs)
+        local_db.add(fs)
+        local_db.commit()
+        local_db.refresh(fs)
+    finally:
+        local_db.close()
 
     report = {
         "feature_set_id": fs.id,

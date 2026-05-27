@@ -21,6 +21,12 @@ def insert_transactions(db: Session, records: List[Dict], dataset_id: int | None
     for r in records:
         r['dataset_id'] = dataset_id
 
+    # Ensure records only contain columns that exist on the transactions table
+    valid_cols = {c.name for c in Transaction.__table__.columns}
+    def _filter_rec(rec: Dict):
+        return {k: v for k, v in rec.items() if k in valid_cols}
+    records = [_filter_rec(r) for r in records]
+
     # Prefer Postgres ON CONFLICT upsert/do-nothing for idempotent inserts when
     # a unique key on (transaction_id, dataset_id) exists. Attempt batched
     # INSERT ... ON CONFLICT DO NOTHING; if the DB doesn't have the expected
@@ -76,4 +82,16 @@ def insert_transactions(db: Session, records: List[Dict], dataset_id: int | None
                     db.rollback()
                     # skip problematic record
                     continue
+    # Log metrics for this insert operation
+    try:
+        attempted = len(records)
+        skipped_by_conflict = attempted - inserted
+        failed = 0  # we are conservative and treat any skipped as conflict/skip
+        conflict_rate = (skipped_by_conflict / attempted) if attempted > 0 else 0.0
+        logger.info("insert_transactions: rows_detected_in_file=%s rows_attempted_insert=%s rows_inserted=%s rows_skipped_by_conflict=%s rows_failed=%s conflict_rate=%.4f",
+                    attempted, attempted, inserted, skipped_by_conflict, failed, conflict_rate)
+        if skipped_by_conflict > 0:
+            logger.warning("Some rows were skipped due to conflicts: skipped=%s conflict_rate=%.4f", skipped_by_conflict, conflict_rate)
+    except Exception:
+        pass
     return inserted

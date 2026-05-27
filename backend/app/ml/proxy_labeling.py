@@ -182,11 +182,18 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
     df["card_product_proxy"] = df.get("card_product_proxy", None)
     if ("card_product_proxy" not in df.columns) or df["card_product_proxy"].isna().all():
         df["card_product_proxy"] = pd.Series(["UNKNOWN"] * len(df), index=df.index)
+    # mark unknown product proxy rows to allow upstream reporting
+    df["_card_product_unknown"] = (df["card_product_proxy"] == "UNKNOWN").astype(int)
     df["_brand_customers_merchant_day"] = df.groupby(["merchant_hash", "card_brand", "_day_bucket"]) ["customer_hash"].transform(lambda x: x.nunique())
     df["feature_same_merchant_15_cards_by_brand"] = (df["_brand_customers_merchant_day"] >= 15).astype(int)
 
     df["_product_customers_merchant_day"] = df.groupby(["merchant_hash", "card_product_proxy", "card_presence_type", "_day_bucket"]) ["customer_hash"].transform(lambda x: x.nunique())
     df["feature_same_merchant_20_cards_by_product_presence"] = (df["_product_customers_merchant_day"] >= 20).astype(int)
+    # If product proxy is UNKNOWN we cannot reliably evaluate product-based rules;
+    # force those features to 0 for UNKNOWN rows.
+    mask_unknown = df["card_product_proxy"] == "UNKNOWN"
+    if mask_unknown.any():
+        df.loc[mask_unknown, "feature_same_merchant_20_cards_by_product_presence"] = 0
 
     # TNP 50 approved by product — approximate: count TNP transactions per product per day
     df["_tnp_product_day"] = 0
@@ -194,6 +201,14 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
     if mask_tnp.any():
         df.loc[mask_tnp, "_tnp_product_day"] = df.loc[mask_tnp].groupby(["card_product_proxy", "_day_bucket"]) ["transaction_datetime"].transform("count")
     df["feature_tnp_50_approved_by_product"] = (df["_tnp_product_day"] >= 50).astype(int)
+    if mask_unknown.any():
+        df.loc[mask_unknown, "feature_tnp_50_approved_by_product"] = 0
+        # emit a warning so upstream reporting can capture prevalence
+        try:
+            import warnings
+            warnings.warn(f"card_product_proxy UNKNOWN for {int(mask_unknown.sum())} records; product-based rules set to 0 for those rows")
+        except Exception:
+            pass
 
     # cleanup helper columns
     to_fill_zero = ["feature_high_amount", "feature_high_amount_1h", "feature_high_amount_1d", "feature_night_transaction", "feature_weekend_transaction", "feature_international_transaction", "feature_many_customer_transactions_day", "feature_many_customer_transactions_hour", "feature_many_merchants_customer_day", "feature_many_merchants_customer_hour", "feature_tp_pem_07", "feature_tnp_transaction", "feature_same_merchant_15_cards_by_brand", "feature_same_merchant_20_cards_by_product_presence", "feature_tnp_50_approved_by_product"]

@@ -36,6 +36,18 @@ COLUMN_ALIASES = {
     "customer_hash": ["customer_hash", "pan_tarjeta", "card_pan", "pan", "card_number", "tarjeta"],
     "transaction_datetime": ["transaction_datetime", "fecha", "date", "fecha_transaccion", "fecha_trans", "fecha_operacion", "datetime", "timestamp", "hora"],
     "is_fraud": ["is_fraud", "fraud", "es_fraude", "fraude", "label", "isfraud"],
+    "country_code": ["country_code", "pais", "país", "country", "pais_name"],
+    "merchant_code": ["merchant_code", "codigo_establecimiento", "codigo_estab", "merchant_id", "codigo"],
+    "terminal_code": ["terminal_code", "codigo_terminal", "terminal", "terminal_id", "terminalcode"],
+    "merchant_name": ["merchant_name", "establecimiento", "establishment", "merchant", "nombre_establecimiento"],
+    "pos_entry_mode": ["pos_entry_mode", "pos_entry", "pos_entrymode", "modo_entrada", "pos"],
+    "has_pinblock": ["has_pinblock", "tiene_pinblock", "pinblock", "has_pin"],
+    "pan_card": ["pan_card", "pan_tarjeta", "tarjeta", "card_pan", "pan"],
+    "masked_card": ["masked_card", "masked", "tarjeta_masked", "masked_pan"],
+    "authorization_code": ["authorization_code", "codigo_autorizacion", "auth_code"],
+    "reference_number": ["reference_number", "numero_referencia", "nro_referencia", "referencia"],
+    "process_code": ["process_code", "codigo_proceso", "codigo_proceso"],
+    "transaction_category": ["transaction_category", "categoria", "categoria_transaccion", "transaction_category"],
 }
 
 
@@ -140,6 +152,18 @@ def import_dataset(db: Session, file, name: str, file_name: str):
     except Exception as e:
         raise ValueError(f"Failed reading uploaded CSV sample: {e}")
 
+    # sanitize sample column names: trim whitespace and surrounding quotes
+    def _clean_cols(cols):
+        out = []
+        for c in cols:
+            s = str(c)
+            s = s.replace('\u00A0', ' ')
+            s = s.strip().strip('"').strip("'")
+            out.append(s)
+        return out
+
+    sample.columns = _clean_cols(sample.columns)
+
     mapped = _map_columns(sample)
 
     # build rename mapping based on detected mappings (ignore datetime tuple for now)
@@ -157,6 +181,9 @@ def import_dataset(db: Session, file, name: str, file_name: str):
     total = 0
     num_inserted = 0
     invalid_count = 0
+    rows_attempted = 0
+    rows_skipped_by_conflict = 0
+    rows_failed = 0
 
     dataset = dataset_repository.create_dataset(
         db,
@@ -187,10 +214,47 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         rows_in_chunk = len(chunk)
         total += rows_in_chunk
 
+        # sanitize chunk column names as well (trim whitespace/quotes)
+        chunk.columns = _clean_cols(chunk.columns)
+
         # rename columns if needed
         if rename_map:
             chunk = chunk.rename(columns=rename_map)
 
+        # fallback aliases: if a single source column was claimed for multiple
+        # expected fields (e.g. terminal_code vs device_id), populate the
+        # canonical fields so downstream logic and required-column checks pass.
+        if 'device_id' not in chunk.columns and 'terminal_code' in chunk.columns:
+            chunk['device_id'] = chunk['terminal_code']
+        if 'customer_hash' not in chunk.columns and 'pan_card' in chunk.columns:
+            chunk['customer_hash'] = chunk['pan_card']
+        if 'location' not in chunk.columns and 'merchant_name' in chunk.columns:
+            chunk['location'] = chunk['merchant_name']
+
+        # compute a deterministic transaction_id early so it's available for
+        # the required-columns check (we compute a hash of stable fields).
+        import hashlib
+        def _compute_tid_row(row):
+            components = [
+                str(row.get('transaction_datetime', '')),
+                str(row.get('amount', '')),
+                str(row.get('customer_hash', '')),
+                str(row.get('merchant_code', '')),
+                str(row.get('terminal_code', '')),
+                str(row.get('reference_number', '')),
+                str(row.get('authorization_code', '')),
+                str(row.get('transaction_type', '')),
+                str(row.get('transaction_category', '')),
+                str(row.get('process_code', '')),
+            ]
+            key = '|'.join([c if c is not None else '' for c in components])
+            h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
+            return f"tx_{h}"
+
+        try:
+            chunk['transaction_id'] = chunk.apply(_compute_tid_row, axis=1)
+        except Exception:
+            pass
         # handle combined date+time if mapping detected in sample
         td = mapped.get('transaction_datetime')
         if isinstance(td, tuple):
@@ -213,7 +277,7 @@ def import_dataset(db: Session, file, name: str, file_name: str):
             logger.warning("[dataset_id=%s] chunk=%s missing required columns: %s", dataset.id, chunk_index, missing)
             continue
 
-        # normalize and parse columns in vectorized manner
+            # normalize and parse columns in vectorized manner
         # parse datetimes
         try:
             parsed_dt = pd.to_datetime(chunk['transaction_datetime'], errors='coerce', utc=True)
@@ -230,9 +294,109 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         chunk['amount'] = chunk['amount'].str.replace(',', '.', regex=False)
         chunk['amount'] = chunk['amount'].str.replace(r'[^0-9\.\-]', '', regex=True)
         chunk['amount'] = pd.to_numeric(chunk['amount'], errors='coerce')
+        # Fallback: some files use '.' as thousands separator and ',' as decimal
+        # If the initial parsing produced all NaN, try an alternative normalization
+        if chunk['amount'].isna().all():
+            try:
+                tmp = chunk['amount'].astype(str).str.replace(r'["\s]', '', regex=True)
+                # remove dots (thousands) then convert comma decimal to dot
+                tmp = tmp.str.replace('.', '', regex=False)
+                tmp = tmp.str.replace(',', '.', regex=False)
+                tmp = tmp.str.replace(r'[^0-9\.\-]', '', regex=True)
+                chunk['amount'] = pd.to_numeric(tmp, errors='coerce')
+            except Exception:
+                pass
 
         # normalize is_fraud
         chunk['is_fraud'] = chunk['is_fraud'].astype(bool)
+
+        # normalize country codes: map common Bolivia variants to 'BO'
+        if 'country_code' in chunk.columns:
+            chunk['country_code'] = chunk['country_code'].astype(str).str.strip().str.upper().replace({'NAN': None, 'NONE': None})
+            chunk['country_code'] = chunk['country_code'].replace({'BOLIVIA': 'BO', 'BOL': 'BO', 'BO': 'BO'})
+
+        # preserve pos_entry_mode as numeric when possible
+        if 'pos_entry_mode' in chunk.columns:
+            chunk['pos_entry_mode'] = pd.to_numeric(chunk['pos_entry_mode'], errors='coerce')
+
+        # preserve has_pinblock as 0/1 when present
+        if 'has_pinblock' in chunk.columns:
+            def to_pin(x):
+                if pd.isna(x):
+                    return None
+                s = str(x).strip().lower()
+                if s in ('1','true','yes','y'):
+                    return 1
+                if s in ('0','false','no','n'):
+                    return 0
+                try:
+                    return int(float(s))
+                except Exception:
+                    return None
+            chunk['has_pinblock'] = chunk['has_pinblock'].apply(to_pin)
+
+        # generate hashes and deterministic transaction_id from composite key
+        try:
+            from backend.app.ml import preprocessing as mlp
+            # ensure customer_hash / merchant_hash and transaction_id generated
+            chunk = mlp.generate_anonymized_keys(chunk)
+        except Exception:
+            pass
+
+        # always compute deterministic transaction_id from composed stable fields
+        import hashlib
+        def compute_tid(row):
+            components = [
+                str(row.get('transaction_datetime', '')),
+                str(row.get('amount', '')),
+                str(row.get('customer_hash', '')),
+                str(row.get('merchant_code', '')),
+                str(row.get('terminal_code', '')),
+                str(row.get('reference_number', '')),
+                str(row.get('authorization_code', '')),
+                str(row.get('transaction_type', '')),
+                str(row.get('transaction_category', '')),
+                str(row.get('process_code', '')),
+            ]
+            key = '|'.join([c if c is not None else '' for c in components])
+            h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
+            return f"tx_{h}"
+
+        chunk['transaction_id'] = chunk.apply(compute_tid, axis=1)
+
+        # infer card_brand from pan_card if available (do not store raw pan)
+        def infer_brand(v):
+            try:
+                s = str(v).strip()
+                if not s:
+                    return None
+                if s[0] == '4':
+                    return 'VISA'
+                if s[0] == '5':
+                    return 'MASTERCARD'
+                if s[0] == '6':
+                    return 'DISCOVER'
+                return 'UNKNOWN'
+            except Exception:
+                return None
+
+        if 'pan_card' in chunk.columns:
+            chunk['card_brand'] = chunk['pan_card'].apply(infer_brand)
+            # do NOT keep raw pan in customer_hash or in DB; ensure masked_card used instead
+            # if masked_card exists, prefer it; otherwise mask pan
+            if 'masked_card' not in chunk.columns:
+                chunk['masked_card'] = chunk['pan_card'].astype(str).apply(lambda x: 'MASKED_' + (x[-4:] if len(x) > 4 else x))
+            # ensure customer_hash is hashed, not raw pan
+            def normalize_customer_hash(ch, pan):
+                if pd.isna(ch) or ch == '' or (isinstance(ch, str) and ch.isdigit() and len(ch) >= 12):
+                    # derive from pan with same prefix used elsewhere
+                    if pd.isna(pan):
+                        return ch
+                    h = hashlib.sha256(str(pan).encode('utf-8')).hexdigest()[:16]
+                    return f"cust_{h}"
+                return ch
+            chunk['customer_hash'] = chunk.apply(lambda r: normalize_customer_hash(r.get('customer_hash'), r.get('pan_card')), axis=1)
+
 
         # determine valid rows
         valid_mask = chunk['transaction_id'].notna() & chunk['amount'].notna() & chunk['transaction_datetime'].notna()
@@ -264,8 +428,13 @@ def import_dataset(db: Session, file, name: str, file_name: str):
         insert_start = time.perf_counter()
         inserted = 0
         if valid_records:
+            attempted = len(valid_records)
+            rows_attempted += attempted
             inserted = transaction_repository.insert_transactions(db, valid_records, dataset_id=dataset.id)
             num_inserted += inserted
+            skipped = attempted - inserted
+            if skipped > 0:
+                rows_skipped_by_conflict += skipped
         insert_time = time.perf_counter() - insert_start
 
         total_chunk_time = time.perf_counter() - start_chunk
@@ -294,7 +463,17 @@ def import_dataset(db: Session, file, name: str, file_name: str):
     except Exception:
         db.rollback()
 
-    return {'dataset': dataset, 'inserted': num_inserted, 'total': total, 'valid': num_inserted, 'invalid': invalid_count}
+    report = {'dataset': dataset, 'inserted': num_inserted, 'total': total, 'valid': num_inserted, 'invalid': invalid_count, 'rows_attempted': rows_attempted, 'rows_skipped_by_conflict': rows_skipped_by_conflict, 'rows_failed': rows_failed}
+    # if conflicts occurred, write a warning into dataset.error_message for later report
+    try:
+        if rows_skipped_by_conflict > 0:
+            dataset.error_message = (dataset.error_message or '') + f"; skipped_by_conflict:{rows_skipped_by_conflict}"
+            db.add(dataset)
+            db.commit()
+    except Exception:
+        db.rollback()
+
+    return report
 
 
 def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_name: str, db_bind: Optional[object] = None):
@@ -335,6 +514,18 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                 db.commit()
             return
 
+        # sanitize sample column names to avoid trailing spaces/quotes
+        def _clean_cols_local(cols):
+            out = []
+            for c in cols:
+                s = str(c)
+                s = s.replace('\u00A0', ' ')
+                s = s.strip().strip('"').strip("'")
+                out.append(s)
+            return out
+
+        sample.columns = _clean_cols_local(sample.columns)
+
         mapped = _map_columns(sample)
 
         rename_map = {}
@@ -349,6 +540,10 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
         total = 0
         num_inserted = 0
         invalid_count = 0
+        # counters used during insertion — ensure they're initialized
+        rows_attempted = 0
+        rows_skipped_by_conflict = 0
+        rows_failed = 0
 
         # determine chunksize from env
         try:
@@ -364,9 +559,48 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
             rows_in_chunk = len(chunk)
             total += rows_in_chunk
 
+            # sanitize chunk column names
+            try:
+                chunk.columns = _clean_cols_local(chunk.columns)
+            except Exception:
+                pass
+
             if rename_map:
                 chunk = chunk.rename(columns=rename_map)
 
+            # fallback aliases to populate canonical fields when the same
+            # source column was matched to multiple expected names in
+            # `_map_columns` — ensures required-columns check sees them.
+            if 'device_id' not in chunk.columns and 'terminal_code' in chunk.columns:
+                chunk['device_id'] = chunk['terminal_code']
+            if 'customer_hash' not in chunk.columns and 'pan_card' in chunk.columns:
+                chunk['customer_hash'] = chunk['pan_card']
+            if 'location' not in chunk.columns and 'merchant_name' in chunk.columns:
+                chunk['location'] = chunk['merchant_name']
+
+            # early deterministic transaction id so it's present for validation
+            import hashlib
+            def _compute_tid_row_bg(row):
+                components = [
+                    str(row.get('transaction_datetime', '')),
+                    str(row.get('amount', '')),
+                    str(row.get('customer_hash', '')),
+                    str(row.get('merchant_code', '')),
+                    str(row.get('terminal_code', '')),
+                    str(row.get('reference_number', '')),
+                    str(row.get('authorization_code', '')),
+                    str(row.get('transaction_type', '')),
+                    str(row.get('transaction_category', '')),
+                    str(row.get('process_code', '')),
+                ]
+                key = '|'.join([c if c is not None else '' for c in components])
+                h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
+                return f"tx_{h}"
+
+            try:
+                chunk['transaction_id'] = chunk.apply(_compute_tid_row_bg, axis=1)
+            except Exception:
+                pass
             td = mapped.get('transaction_datetime')
             if isinstance(td, tuple):
                 date_col, time_col = td
@@ -401,7 +635,92 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
             chunk['amount'] = chunk['amount'].str.replace(r'[^0-9\.\-]', '', regex=True)
             chunk['amount'] = pd.to_numeric(chunk['amount'], errors='coerce')
 
+            # fallback for European formatted numbers (thousands sep '.') and comma decimal
+            if chunk['amount'].isna().all():
+                try:
+                    tmp = chunk['amount'].astype(str).str.replace(r'["\s]', '', regex=True)
+                    tmp = tmp.str.replace('.', '', regex=False)
+                    tmp = tmp.str.replace(',', '.', regex=False)
+                    tmp = tmp.str.replace(r'[^0-9\.\-]', '', regex=True)
+                    chunk['amount'] = pd.to_numeric(tmp, errors='coerce')
+                except Exception:
+                    pass
+
             chunk['is_fraud'] = chunk['is_fraud'].astype(bool)
+
+            # normalize country codes and other fields in background import as well
+            if 'country_code' in chunk.columns:
+                chunk['country_code'] = chunk['country_code'].astype(str).str.strip().str.upper().replace({'NAN': None, 'NONE': None})
+                chunk['country_code'] = chunk['country_code'].replace({'BOLIVIA': 'BO', 'BOL': 'BO', 'BO': 'BO'})
+            if 'pos_entry_mode' in chunk.columns:
+                chunk['pos_entry_mode'] = pd.to_numeric(chunk['pos_entry_mode'], errors='coerce')
+            if 'has_pinblock' in chunk.columns:
+                def to_pin(x):
+                    if pd.isna(x):
+                        return None
+                    s = str(x).strip().lower()
+                    if s in ('1','true','yes','y'):
+                        return 1
+                    if s in ('0','false','no','n'):
+                        return 0
+                    try:
+                        return int(float(s))
+                    except Exception:
+                        return None
+                chunk['has_pinblock'] = chunk['has_pinblock'].apply(to_pin)
+
+            try:
+                from backend.app.ml import preprocessing as mlp
+                chunk = mlp.generate_anonymized_keys(chunk)
+            except Exception:
+                pass
+
+            import hashlib
+            def compute_tid(row):
+                components = [
+                    str(row.get('transaction_datetime', '')),
+                    str(row.get('amount', '')),
+                    str(row.get('customer_hash', '')),
+                    str(row.get('merchant_code', '')),
+                    str(row.get('terminal_code', '')),
+                    str(row.get('reference_number', '')),
+                    str(row.get('authorization_code', '')),
+                    str(row.get('transaction_type', '')),
+                    str(row.get('transaction_category', '')),
+                    str(row.get('process_code', '')),
+                ]
+                key = '|'.join([c if c is not None else '' for c in components])
+                h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
+                return f"tx_{h}"
+
+            chunk['transaction_id'] = chunk.apply(compute_tid, axis=1)
+
+            def infer_brand(v):
+                try:
+                    s = str(v).strip()
+                    if not s:
+                        return None
+                    if s[0] == '4':
+                        return 'VISA'
+                    if s[0] == '5':
+                        return 'MASTERCARD'
+                    if s[0] == '6':
+                        return 'DISCOVER'
+                    return 'UNKNOWN'
+                except Exception:
+                    return None
+
+            if 'pan_card' in chunk.columns:
+                chunk['card_brand'] = chunk['pan_card'].apply(infer_brand)
+                if 'masked_card' not in chunk.columns:
+                    chunk['masked_card'] = chunk['pan_card'].astype(str).apply(lambda x: 'MASKED_' + (x[-4:] if len(x) > 4 else x))
+                def normalize_customer_hash(ch, pan):
+                    if pd.isna(ch) or ch == '' or (isinstance(ch, str) and ch.isdigit() and len(ch) >= 12):
+                        if pd.isna(pan):
+                            return ch
+                        return hashlib.sha256(str(pan).encode('utf-8')).hexdigest()[:16]
+                    return ch
+                chunk['customer_hash'] = chunk.apply(lambda r: normalize_customer_hash(r.get('customer_hash'), r.get('pan_card')), axis=1)
 
             valid_mask = chunk['transaction_id'].notna() & chunk['amount'].notna() & chunk['transaction_datetime'].notna()
             valid_df = chunk.loc[valid_mask]
@@ -419,6 +738,15 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                         'location': row.get('location'),
                         'device_id': row.get('device_id'),
                         'customer_hash': row.get('customer_hash'),
+                        'merchant_hash': row.get('merchant_hash'),
+                        'merchant_code': row.get('merchant_code'),
+                        'terminal_code': row.get('terminal_code'),
+                        'merchant_name': row.get('merchant_name'),
+                        'country_code': row.get('country_code'),
+                        'pos_entry_mode': int(row['pos_entry_mode']) if (not pd.isna(row.get('pos_entry_mode')) and str(row.get('pos_entry_mode')) != 'nan') else None,
+                        'has_pinblock': int(row['has_pinblock']) if (not pd.isna(row.get('has_pinblock')) and str(row.get('has_pinblock')) != 'nan') else None,
+                        'card_brand': row.get('card_brand'),
+                        'masked_card': row.get('masked_card'),
                         'transaction_datetime': row['transaction_datetime'].to_pydatetime() if not pd.isna(row['transaction_datetime']) else None,
                         'is_fraud': bool(row['is_fraud']),
                     }
@@ -436,8 +764,13 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                         ds.status = 'INSERTING'
                         db.add(ds)
                         db.commit()
+                    attempted = len(valid_records)
+                    rows_attempted += attempted
                     inserted = transaction_repository.insert_transactions(db, valid_records, dataset_id=dataset_id)
                     num_inserted += inserted
+                    skipped = attempted - inserted
+                    if skipped > 0:
+                        rows_skipped_by_conflict += skipped
                 except Exception as e:
                     logger.exception("Error inserting chunk %s for dataset %s: %s", chunk_index, dataset_id, e)
                     # record error but continue with next chunks
