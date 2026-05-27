@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import dataset_service
@@ -6,25 +6,144 @@ from backend.app.services.permission_service import require_permission
 from backend.app.repositories import dataset_repository
 import pandas as pd
 import os
+import json
+from uuid import uuid4
+from datetime import datetime
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
 @router.post("/import")
-def import_dataset(file: UploadFile = File(...), db: Session = Depends(get_db), _auth=Depends(require_permission("import_data"))):
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are supported")
+def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), _auth=Depends(require_permission("import_data"))):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Only CSV files are supported')
+
+    # Persist upload quickly to disk and create dataset record; schedule background processing
+    storage_dir = os.environ.get('DATASET_STORAGE', os.path.join(os.getcwd(), 'data', 'uploads'))
     try:
-        result = dataset_service.import_dataset(db, file.file, name=file.filename, file_name=file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        os.makedirs(storage_dir, exist_ok=True)
+    except Exception:
+        pass
+    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    safe_name = f"{timestamp}_{os.path.basename(file.filename)}"
+    dest_path = os.path.join(storage_dir, safe_name)
+    try:
+        file.file.seek(0)
+        with open(dest_path, 'wb') as out:
+            chunk = file.file.read(1024 * 1024)
+            while chunk:
+                out.write(chunk)
+                chunk = file.file.read(1024 * 1024)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    ds = result.get('dataset')
-    details = {"inserted": result["inserted"], "total": result["total"], "valid": result["valid"], "invalid": result["invalid"]}
-    if ds:
-        details.update({"dataset_id": ds.id, "file_path": ds.file_path, "original_filename": ds.original_filename})
-    return {"message": "imported", "details": details}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed saving uploaded file: {e}")
+
+    # create dataset record in DB with status 'importing'
+    try:
+        dataset = dataset_repository.create_dataset(db, name=file.filename, file_name=safe_name, file_path=dest_path, original_filename=file.filename, total_records=0, valid_records=0, invalid_records=0, status='importing')
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed creating dataset record: {e}")
+
+    # schedule background processing
+    try:
+        # create a job id and store in dataset metadata
+        job_id = str(uuid4())
+        meta = {'job_id': job_id, 'submitted_at': datetime.utcnow().isoformat()}
+        dataset.metadata_json = json.dumps(meta)
+        db.add(dataset)
+        db.commit()
+        background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name)
+    except Exception as e:
+        # if background scheduling fails, mark dataset as failed
+        dataset.status = 'failed'
+        db.add(dataset)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed scheduling background processing: {e}")
+
+    return {"accepted": True, "dataset_id": dataset.id, "job_id": job_id, "status": "PROCESSING", "message": "Dataset import accepted for background processing"}
+
+
+@router.post('/import-background')
+def import_dataset_background_route(file: UploadFile = File(...), background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), _auth=Depends(require_permission("import_data"))):
+    # New explicit background import endpoint. Behaves like /import but named for clarity.
+    if not file.filename.lower().endswith(('.csv', '.xlsx', '.xlsb', '.xls')):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Only CSV/XLSX/XLSB/XLS files are supported')
+
+    storage_dir = os.environ.get('DATASET_STORAGE', os.path.join(os.getcwd(), 'data', 'uploads'))
+    try:
+        os.makedirs(storage_dir, exist_ok=True)
+    except Exception:
+        pass
+    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    safe_name = f"{timestamp}_{os.path.basename(file.filename)}"
+    dest_path = os.path.join(storage_dir, safe_name)
+    try:
+        file.file.seek(0)
+        with open(dest_path, 'wb') as out:
+            chunk = file.file.read(1024 * 1024)
+            while chunk:
+                out.write(chunk)
+                chunk = file.file.read(1024 * 1024)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed saving uploaded file: {e}")
+
+    try:
+        dataset = dataset_repository.create_dataset(db, name=file.filename, file_name=safe_name, file_path=dest_path, original_filename=file.filename, total_records=0, valid_records=0, invalid_records=0, status='UPLOADED')
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed creating dataset record: {e}")
+
+    job_id = str(uuid4())
+    meta = {'job_id': job_id, 'submitted_at': datetime.utcnow().isoformat()}
+    dataset.metadata_json = json.dumps(meta)
+    db.add(dataset)
+    db.commit()
+
+    try:
+        background_tasks.add_task(dataset_service.import_dataset_background, dest_path, dataset.id, file.filename, safe_name)
+    except Exception as e:
+        dataset.status = 'FAILED'
+        dataset.error_message = f"Failed scheduling background processing: {e}"
+        db.add(dataset)
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed scheduling background processing: {e}")
+
+    return {"accepted": True, "dataset_id": dataset.id, "job_id": job_id, "status": "PROCESSING", "message": "Dataset import accepted for background processing"}
+
+
+@router.get('/{dataset_id}/status')
+def dataset_status(dataset_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission('preprocess'))):
+    ds = dataset_repository.get_dataset(db, dataset_id)
+    if not ds:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Dataset not found')
+    # compute progress
+    total = ds.total_records or 0
+    processed = (ds.valid_records or 0) + (ds.invalid_records or 0)
+    inserted = ds.valid_records or 0
+    progress = 0
+    if total > 0:
+        progress = int(processed * 100 / total)
+    # attempt to extract job_id
+    job_id = None
+    try:
+        if ds.metadata_json:
+            meta = json.loads(ds.metadata_json)
+            job_id = meta.get('job_id')
+    except Exception:
+        job_id = None
+
+    return {
+        'dataset_id': ds.id,
+        'status': ds.status,
+        'total_rows': total,
+        'processed_rows': processed,
+        'valid_rows': ds.valid_records or 0,
+        'invalid_rows': ds.invalid_records or 0,
+        'inserted_rows': inserted,
+        'progress_percent': progress,
+        'error_message': ds.error_message,
+        'started_at': ds.started_at.isoformat() if getattr(ds, 'started_at', None) else None,
+        'finished_at': ds.finished_at.isoformat() if getattr(ds, 'finished_at', None) else None,
+        'job_id': job_id,
+    }
 
 
 

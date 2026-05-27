@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
@@ -15,12 +15,20 @@ router = APIRouter(prefix="/preprocessing", tags=["preprocessing"])
 
 
 @router.post("/run")
-def run_preprocessing(dataset_id: int | None = None, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+def run_preprocessing(background_tasks: BackgroundTasks, dataset_id: int | None = None, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    """Start a preprocessing run asynchronously.
+
+    This endpoint creates a PreprocessingRun row (PENDING) and schedules the
+    actual work in the background. Returns 202 with the run id so the UI can
+    poll progress.
+    """
     try:
-        summary = preprocessing_service.run_preprocessing(db, dataset_id=dataset_id)
+        run = preprocessing_service.create_run(db, dataset_id=dataset_id, apply_smote=True)
+        # schedule background execution (uses its own DB session)
+        background_tasks.add_task(preprocessing_service.run_preprocessing_background, run.id)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-    return {"status": "ok", "summary": summary}
+    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=jsonable_encoder({"status": "accepted", "run_id": run.id}))
 
 
 @router.post("/run_training")

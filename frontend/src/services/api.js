@@ -1,7 +1,8 @@
 import axios from 'axios'
 
-// Set a reasonable default timeout so the UI won't hang indefinitely
-const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000', timeout: 5000 })
+// Set a reasonable default timeout so the UI won't hang indefinitely.
+// Background import means the UI doesn't need an infinite timeout.
+const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000', timeout: 120000 })
 
 // Attach X-User-Email header when a user is stored in localStorage (guard in test mocks)
 if (api.interceptors && api.interceptors.request && typeof api.interceptors.request.use === 'function') {
@@ -74,6 +75,15 @@ export async function register(payload){
 export async function importDataset(file){
   const form = new FormData(); form.append('file', file)
   return api.post('/datasets/import', form, { headers: {'Content-Type':'multipart/form-data'} }).then(r=>r.data)
+}
+
+export async function importDatasetBackground(file){
+  const form = new FormData(); form.append('file', file)
+  return api.post('/datasets/import-background', form, { headers: {'Content-Type':'multipart/form-data'} }).then(r=>r.data)
+}
+
+export async function getDatasetStatus(datasetId){
+  return api.get(`/datasets/${datasetId}/status`).then(r=> r.data)
 }
 export async function runPreprocessing(datasetId = null){
   // If datasetId provided, send as query param so backend can scope run

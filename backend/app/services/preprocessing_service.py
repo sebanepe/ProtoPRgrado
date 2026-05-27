@@ -7,6 +7,7 @@ from backend.app.models.models import FeatureSet
 import json
 import pandas as pd
 from backend.app.models.models import Dataset
+from backend.app.database import SessionLocal
 
 # persistent processed folder inside project for training/artifacts (absolute path)
 PROJECT_PROCESSED_DIR = r"C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\data\processed"
@@ -96,6 +97,37 @@ def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: 
         db.add(run)
         db.commit()
         raise
+
+
+def create_run(db: Session, dataset_id: int | None = None, apply_smote: bool = True) -> PreprocessingRun:
+    """Create a PreprocessingRun row in PENDING state and return it."""
+    run = PreprocessingRun(
+        status="PENDING",
+        started_at=None,
+        params_json=str({"apply_smote": bool(apply_smote), "dataset_id": dataset_id}),
+        input_dataset_id=dataset_id,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def run_preprocessing_background(run_id: int):
+    """Background runner that creates its own DB session and executes the preprocessing run.
+
+    This is safe to enqueue via FastAPI BackgroundTasks and will call `rerun_preprocessing`
+    which updates the PreprocessingRun row in-place.
+    """
+    db = SessionLocal()
+    try:
+        # reuse existing rerun logic which marks the run RUNNING and performs processing
+        rerun_preprocessing(db, run_id=run_id)
+    except Exception:
+        # rerun_preprocessing already persists failure state; ensure session closed
+        db.rollback()
+    finally:
+        db.close()
 
 
 def rerun_preprocessing(db: Session, run_id: int):
