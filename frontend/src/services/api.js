@@ -96,6 +96,7 @@ export async function listPreprocessingRuns(){ return api.get('/preprocessing/ru
 export async function previewPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/preview`).then(r=> r.data) }
 export async function getPreprocessingRunStages(id){ return api.get(`/preprocessing/runs/${id}/stages`).then(r=> r.data) }
 export async function downloadPreprocessingRun(id){ return api.get(`/preprocessing/runs/${id}/download`, { responseType: 'blob' }).then(r=> r.data) }
+export async function downloadPreprocessingRunReport(id){ return api.get(`/preprocessing/runs/${id}/report`, { responseType: 'blob' }).then(r=> r.data) }
 export async function deletePreprocessingRun(id){ return api.delete(`/preprocessing/runs/${id}`).then(r=> r.data) }
 export async function runPreprocessingTraining(runId){ return api.post('/preprocessing/run_training', null, { params: { run_id: runId } }).then(r=> r.data) }
 export async function previewFeatureSet(id, rows=10){ return api.get(`/feature_sets/${id}/preview`, { params: { rows } }).then(r=> r.data) }

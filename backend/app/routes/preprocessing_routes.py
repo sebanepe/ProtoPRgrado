@@ -217,6 +217,20 @@ def download_processed_run(run_id: int, db: Session = Depends(get_db), _auth=Dep
     return FileResponse(path=r.output_file_path, filename=os.path.basename(r.output_file_path), media_type='text/csv')
 
 
+@router.get("/runs/{run_id}/report")
+def download_processed_run_report(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+    """Return the markdown report associated with a preprocessing run."""
+    r = db.query(PreprocessingRun).filter(PreprocessingRun.id == run_id).first()
+    if not r:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+
+    report_path = os.path.join(os.path.dirname(r.output_file_path or os.path.join(os.getcwd(), "data", "processed")), f"preprocessing_report_run_{run_id}.md")
+    if not os.path.exists(report_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="report file not found")
+
+    return FileResponse(path=report_path, filename=os.path.basename(report_path), media_type='text/markdown')
+
+
 @router.post("/runs/{run_id}/rerun")
 def rerun_preprocessing(run_id: int, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
     try:

@@ -18,6 +18,121 @@ PROJECT_PROCESSED_DIR = os.environ.get("PROJECT_PROCESSED_DIR") or os.path.join(
 
 DEFAULT_OUTPUT = os.path.join("data", "processed", "preprocessed_transactions.csv")
 
+PHASE_A_EXCLUDED_COLUMNS = {
+    "is_fraud",
+    "is_fraud_proxy",
+    "confirmed_fraud",
+    "analyst_label",
+    "label_source",
+    "fraud_label_reason",
+    "risk_signal_reason",
+    "behavioral_risk_score",
+    "independent_rule_groups",
+    "amount_scaled",
+    "card_product_proxy",
+    "response_high_risk",
+    "normalized_response_code",
+    "response_code_reason",
+}
+
+PHASE_A_EXCLUDED_PREFIXES = ("feature_",)
+PHASE_A_INTERNAL_COLUMNS = {"_card_product_unknown"}
+
+
+def _phase_a_filter_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    phase_a_df = df.copy()
+    dropped = [c for c in phase_a_df.columns if c in PHASE_A_EXCLUDED_COLUMNS or c in PHASE_A_INTERNAL_COLUMNS or c.startswith(PHASE_A_EXCLUDED_PREFIXES)]
+    phase_a_df = phase_a_df.drop(columns=dropped, errors="ignore")
+    return phase_a_df, dropped
+
+
+def _write_phase_a_report(report_path: str, source_label: str, source_columns: list[str], cleaned_df: pd.DataFrame, summary: dict, dropped_columns: list[str]):
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+    nulls = cleaned_df.isnull().sum().to_dict()
+    visible_dropped_columns = [c for c in dropped_columns if c not in PHASE_A_INTERNAL_COLUMNS]
+    distributions = {}
+    for col in ["country_code", "pos_entry_mode", "has_pinblock", "card_presence_type", "card_brand"]:
+        if col in cleaned_df.columns:
+            try:
+                distributions[col] = cleaned_df[col].value_counts(dropna=False).to_dict()
+            except Exception:
+                distributions[col] = {}
+    if "merchant_rubro_proxy" in cleaned_df.columns:
+        try:
+            rubro_counts = cleaned_df["merchant_rubro_proxy"].fillna("UNKNOWN").astype(str).str.strip().replace({"": "UNKNOWN"}).value_counts(dropna=False)
+            distributions["merchant_rubro_proxy"] = rubro_counts.to_dict()
+        except Exception:
+            distributions["merchant_rubro_proxy"] = {}
+            rubro_counts = pd.Series(dtype=int)
+    else:
+        rubro_counts = pd.Series(dtype=int)
+
+    unique_customer_hash = int(cleaned_df["customer_hash"].nunique()) if "customer_hash" in cleaned_df.columns else 0
+    unique_merchant_hash = int(cleaned_df["merchant_hash"].nunique()) if "merchant_hash" in cleaned_df.columns else 0
+    removed_records = int(summary.get("before", len(cleaned_df)) - summary.get("after_clean", len(cleaned_df)))
+    missing_reasons = summary.get("missing_report", {}).get("reasons", []) if isinstance(summary.get("missing_report"), dict) else []
+    dup_report = summary.get("duplicates_report", {}) if isinstance(summary.get("duplicates_report"), dict) else {}
+    card_product_unknown_count = int(summary.get("card_product_unknown_count", 0) or 0)
+    rubro_unknown_count = int(rubro_counts.get("UNKNOWN", 0)) if not rubro_counts.empty else 0
+    rubro_warning = len(cleaned_df) > 0 and rubro_unknown_count == len(cleaned_df)
+    
+    # Extract country_code normalization statistics
+    cc_normalization = summary.get("country_code_normalization", {})
+    iso3_normalized_count = cc_normalization.get("iso3_normalized_count", 0)
+    bolivia_dirty_normalized_count = cc_normalization.get("bolivia_dirty_normalized_count", 0)
+    country_code_distribution = cc_normalization.get("country_code_distribution", {})
+    bo_is_international_check = cc_normalization.get("bo_is_international_check")
+    unknown_is_international_check = cc_normalization.get("unknown_is_international_check")
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("# Preprocessing Report\n\n")
+        f.write(f"Source: {source_label}\n\n")
+        f.write("## Rows\n")
+        f.write(f"- original_rows: {summary.get('before', len(cleaned_df))}\n")
+        f.write(f"- processed_rows: {len(cleaned_df)}\n")
+        f.write(f"- removed_rows: {removed_records}\n")
+        if missing_reasons:
+            f.write(f"- removal_reasons: {', '.join(map(str, missing_reasons))}\n")
+        if dup_report:
+            f.write(f"- duplicates_removed: {dup_report.get('duplicates_removed', 0)}\n")
+        if card_product_unknown_count > 0:
+            f.write(f"- card_product_unknown_rows: {card_product_unknown_count}\n")
+        f.write("\n## Columns\n")
+        f.write(f"- original_columns: {', '.join(source_columns)}\n")
+        f.write(f"- normalized_columns: {', '.join(list(cleaned_df.columns))}\n")
+        f.write(f"- removed_phase_a_columns: {', '.join(visible_dropped_columns)}\n")
+        f.write("\n## Nulls\n")
+        for col, count in nulls.items():
+            f.write(f"- {col}: {int(count)}\n")
+        f.write("\n## Distributions\n")
+        for col, dist in distributions.items():
+            f.write(f"- {col}: {dist}\n")
+        f.write(f"- customer_hash_unique: {unique_customer_hash}\n")
+        f.write(f"- merchant_hash_unique: {unique_merchant_hash}\n")
+        if rubro_warning:
+            f.write("- warning: El dataset no contiene RUBRO/MCC; las reglas basadas en rubro serán omitidas en Fase B.\n")
+        
+        # Country code normalization section
+        f.write("\n## Country Code Normalization\n")
+        f.write(f"- iso3_to_iso2_normalized: {iso3_normalized_count}\n")
+        f.write(f"- bolivia_dirty_variants_normalized: {bolivia_dirty_normalized_count}\n")
+        if bolivia_dirty_normalized_count > 0:
+            f.write("- warning: Se normalizaron códigos sucios terminados en BO hacia BO (ej: 0BO, ZBO, CBO, etc.).\n")
+        f.write(f"- top_20_country_codes: {country_code_distribution}\n")
+        f.write(f"- bo_has_is_international_0: {bo_is_international_check}\n")
+        f.write(f"- unknown_has_is_international_0: {unknown_is_international_check}\n")
+        
+        f.write("\n## Confirmations\n")
+        f.write("- PAN_TARJETA not present in output.\n")
+        f.write("- TARJETA not present in output.\n")
+        f.write("- is_fraud not generated by Phase A output.\n")
+        f.write("- confirmed_fraud not generated by Phase A output.\n")
+        f.write("- SMOTE not applied.\n")
+        f.write("- OneHotEncoder not applied.\n")
+        f.write("- StandardScaler not applied.\n")
+        f.write("- No models were trained in Phase A.\n")
+        f.write("- The column is_fraud is retained only for backward compatibility in the database and is not part of the new Phase A flow.\n")
+
 
 def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: bool = True, dataset_id: int | None = None):
     """Run preprocessing over available transactions and record a PreprocessingRun.
@@ -25,8 +140,6 @@ def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: 
     This function creates a PreprocessingRun DB row (status tracking), executes the
     preprocessing pipeline, saves results to disk and updates the run record.
     """
-    output = output_path or DEFAULT_OUTPUT
-
     # create run record
     run = PreprocessingRun(
         status="RUNNING",
@@ -40,6 +153,7 @@ def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: 
 
     try:
         df = fetch_transactions_df(db, dataset_id=dataset_id)
+        source_columns = list(df.columns) if df is not None else []
 
         # If dataset_id provided but no transactions found, attempt to load original dataset CSV
         if (df is None or df.empty) and dataset_id is not None:
@@ -53,31 +167,20 @@ def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: 
                     # ignore and continue with empty df
                     df = df
         cleaned_df, summary = preprocess_dataframe(df)
+        phase_a_df, dropped_columns = _phase_a_filter_columns(cleaned_df)
 
-        if cleaned_df is not None and not cleaned_df.empty:
-            # save cleaned dataset (FASE A)
-            save_processed(cleaned_df, output)
+        if phase_a_df is not None and not phase_a_df.empty:
+            output = output_path or os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
+            save_processed(phase_a_df, output)
             summary["output_path"] = output
 
-            # also save canonical cleaned dataset into project processed folder
             os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
-            project_path = os.path.join(PROJECT_PROCESSED_DIR, f"cleaned_dataset_run_{run.id}.csv")
-            save_processed(cleaned_df, project_path)
+            project_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
+            save_processed(phase_a_df, project_path)
             summary["project_output_path"] = project_path
-            # create a training_dataset copy (without sensitive columns, no OneHot, no SMOTE)
-            training_path = os.path.join(PROJECT_PROCESSED_DIR, f"training_dataset_run_{run.id}.csv")
-            try:
-                # remove sensitive columns before saving training dataset
-                cleaned_nosensitive = cleaned_df.copy()
-                sensitive = ["pan_card", "masked_card", "tarjeta", "pan_tarjeta", "numero_cuenta", "documento_identidad"]
-                cols_to_drop = [c for c in cleaned_nosensitive.columns if c.lower() in sensitive]
-                cleaned_nosensitive = cleaned_nosensitive.drop(columns=cols_to_drop, errors="ignore")
-                save_processed(cleaned_nosensitive, training_path)
-                summary["training_dataset_path"] = training_path
-            except Exception:
-                pass
-
-            # prefer the project-scoped cleaned path as the run's output file
+            report_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessing_report_run_{run.id}.md")
+            _write_phase_a_report(report_path, source_label=f"dataset_id={dataset_id}" if dataset_id else "uploaded CSV", source_columns=source_columns, cleaned_df=phase_a_df, summary=summary, dropped_columns=dropped_columns)
+            summary["report_path"] = report_path
             summary["output_path"] = project_path
         else:
             summary["output_path"] = None
@@ -149,6 +252,7 @@ def rerun_preprocessing(db: Session, run_id: int):
     try:
         dataset_id = run.input_dataset_id
         df = fetch_transactions_df(db, dataset_id=dataset_id)
+        source_columns = list(df.columns) if df is not None else []
 
         # fallback to dataset CSV if no transactions found
         if (df is None or df.empty) and dataset_id is not None:
@@ -179,28 +283,20 @@ def rerun_preprocessing(db: Session, run_id: int):
                     df = df
 
         cleaned_df, summary = preprocess_dataframe(df)
+        phase_a_df, dropped_columns = _phase_a_filter_columns(cleaned_df)
 
-        if cleaned_df is not None and not cleaned_df.empty:
-            output = DEFAULT_OUTPUT
-            save_processed(cleaned_df, output)
+        if phase_a_df is not None and not phase_a_df.empty:
+            output = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
+            save_processed(phase_a_df, output)
             summary["output_path"] = output
 
             os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
-            project_path = os.path.join(PROJECT_PROCESSED_DIR, f"cleaned_dataset_run_{run.id}.csv")
-            save_processed(cleaned_df, project_path)
+            project_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
+            save_processed(phase_a_df, project_path)
             summary["project_output_path"] = project_path
-
-            training_path = os.path.join(PROJECT_PROCESSED_DIR, f"training_dataset_run_{run.id}.csv")
-            try:
-                cleaned_nosensitive = cleaned_df.copy()
-                sensitive = ["pan_card", "masked_card", "tarjeta", "pan_tarjeta", "numero_cuenta", "documento_identidad"]
-                cols_to_drop = [c for c in cleaned_nosensitive.columns if c.lower() in sensitive]
-                cleaned_nosensitive = cleaned_nosensitive.drop(columns=cols_to_drop, errors="ignore")
-                save_processed(cleaned_nosensitive, training_path)
-                summary["training_dataset_path"] = training_path
-            except Exception:
-                pass
-
+            report_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessing_report_run_{run.id}.md")
+            _write_phase_a_report(report_path, source_label=f"dataset_id={dataset_id}" if dataset_id else "uploaded CSV", source_columns=source_columns, cleaned_df=phase_a_df, summary=summary, dropped_columns=dropped_columns)
+            summary["report_path"] = report_path
             summary["output_path"] = project_path
         else:
             summary["output_path"] = None
@@ -228,7 +324,7 @@ def delete_preprocessing_run(db: Session, run_id: int):
     """Delete a PreprocessingRun record and any associated output files.
 
     This will remove the files saved under the project processed directory
-    (cleaned/training copies) and delete the DB row. It is idempotent: if
+    (preprocessed copy and report) and delete the DB row. It is idempotent: if
     the run doesn't exist, raises ValueError; if files are missing, it
     ignores file-not-found errors.
     """
@@ -236,15 +332,15 @@ def delete_preprocessing_run(db: Session, run_id: int):
     if not run:
         raise ValueError("run not found")
 
-    # attempt to delete output file and training file (if present)
+    # attempt to delete output file and report (if present)
     paths = []
     if run.output_file_path:
         paths.append(run.output_file_path)
 
     # also attempt canonical project files
-    project_clean = os.path.join(PROJECT_PROCESSED_DIR, f"cleaned_dataset_run_{run.id}.csv")
-    project_training = os.path.join(PROJECT_PROCESSED_DIR, f"training_dataset_run_{run.id}.csv")
-    paths.extend([project_clean, project_training])
+    project_clean = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
+    project_report = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessing_report_run_{run.id}.md")
+    paths.extend([project_clean, project_report])
 
     for p in paths:
         try:

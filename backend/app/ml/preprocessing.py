@@ -8,6 +8,141 @@ from backend.app.models.models import Transaction
 from backend.app.ml import proxy_labeling
 
 
+COUNTRY_CODE_CANONICAL_MAP = {
+    # USA variants
+    "USA": "US",
+    "UNITED STATES": "US",
+    "ESTADOS UNIDOS": "US",
+    # ISO-3 to ISO-2 mappings (alphabetical)
+    "ARG": "AR",
+    "AUS": "AU",
+    "AUT": "AT",
+    "BEL": "BE",
+    "BGR": "BG",
+    "BOL": "BO",
+    "BOLIVIA": "BO",
+    "BRA": "BR",
+    "CAN": "CA",
+    "CHE": "CH",
+    "CHL": "CL",
+    "CHN": "CN",
+    "COL": "CO",
+    "CRI": "CR",
+    "CYP": "CY",
+    "DEU": "DE",
+    "DNK": "DK",
+    "DOM": "DO",
+    "ECU": "EC",
+    "EST": "EE",
+    "ESP": "ES",
+    "FIN": "FI",
+    "FRA": "FR",
+    "GBR": "GB",
+    "GRC": "GR",
+    "GTM": "GT",
+    "HND": "HN",
+    "IND": "IN",
+    "IRL": "IE",
+    "ITA": "IT",
+    "JAM": "JM",
+    "JPN": "JP",
+    "KOR": "KR",
+    "LTU": "LT",
+    "LUX": "LU",
+    "MYS": "MY",
+    "MEX": "MX",
+    "NIC": "NI",
+    "NLD": "NL",
+    "NOR": "NO",
+    "NZL": "NZ",
+    "PAN": "PA",
+    "PER": "PE",
+    "PHL": "PH",
+    "POL": "PL",
+    "PRT": "PT",
+    "PRY": "PY",
+    "SAU": "SA",
+    "SRB": "RS",
+    "SGP": "SG",
+    "SLV": "SV",
+    "SVK": "SK",
+    "SWE": "SE",
+    "THA": "TH",
+    "TUR": "TR",
+    "URY": "UY",
+    "VEN": "VE",
+    "ARE": "AE",
+}
+
+MERCANT_RUBRO_CANDIDATES = [
+    "merchant_rubro_proxy",
+    "rubro",
+    "mcc",
+    "merchant_category_code",
+    "codigo_rubro",
+    "categoria_comercio",
+]
+
+
+def _normalize_text_token(value) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        text = unicodedata.normalize("NFKD", str(value))
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace("\u00A0", " ").strip().upper()
+        text = " ".join(text.split())
+        return text or None
+    except Exception:
+        text = str(value).replace("\u00A0", " ").strip().upper()
+        text = " ".join(text.split())
+        return text or None
+
+
+def normalize_country_code_value(value) -> str:
+    """Normalize country_code: ISO-3 to ISO-2, clean Bolivia variants, UNKNOWN fallback."""
+    normalized = _normalize_text_token(value)
+    if normalized is None or normalized in {"", "NAN", "NONE", "NULL", "UNKNOWN"}:
+        return "UNKNOWN"
+    
+    # Check if already in map (ISO-3 or known variants)
+    if normalized in COUNTRY_CODE_CANONICAL_MAP:
+        return COUNTRY_CODE_CANONICAL_MAP[normalized]
+    
+    # Handle dirty Bolivia variants (ends with BO, e.g., 0BO, ZBO, CBO, etc.)
+    if len(normalized) <= 3 and normalized.endswith("BO") and normalized != "BO":
+        # Pattern: ?BO where ? is any character
+        return "BO"
+    
+    # Return as-is if unrecognized but looks valid (2 chars, typically ISO-2)
+    return normalized
+
+
+def normalize_merchant_rubro_value(value) -> str:
+    normalized = _normalize_text_token(value)
+    if normalized is None or normalized in {"", "NAN", "NONE", "NULL", "UNKNOWN"}:
+        return "UNKNOWN"
+    return normalized
+
+
+def ensure_merchant_rubro_proxy(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    def pick_rubro(row):
+        for col in MERCANT_RUBRO_CANDIDATES:
+            if col in row and not pd.isna(row[col]):
+                value = normalize_merchant_rubro_value(row[col])
+                if value != "UNKNOWN":
+                    return value
+        return "UNKNOWN"
+
+    if any(col in df.columns for col in MERCANT_RUBRO_CANDIDATES):
+        df["merchant_rubro_proxy"] = df.apply(pick_rubro, axis=1)
+    else:
+        df["merchant_rubro_proxy"] = "UNKNOWN"
+    return df
+
+
 def fetch_transactions_df(db, dataset_id: int | None = None) -> pd.DataFrame:
     if dataset_id:
         rows = db.query(Transaction).filter(Transaction.dataset_id == dataset_id).all()
@@ -378,21 +513,65 @@ def generate_time_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def generate_location_features(df: pd.DataFrame) -> pd.DataFrame:
+def generate_location_features_with_stats(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+    """Generate location features and return normalization statistics."""
     df = df.copy()
+    stats = {
+        "iso3_normalized_count": 0,
+        "bolivia_dirty_normalized_count": 0,
+        "country_code_distribution": {},
+        "bo_is_international_check": None,
+        "unknown_is_international_check": None,
+    }
+    
     if "country_code" in df.columns:
-        df["country_code"] = df["country_code"].astype(str).str.strip().str.upper().replace({"NAN": None, "NONE": None, "UNKNOWN": None, "": None})
+        # Track before normalization for comparison
+        before_values = df["country_code"].copy()
+        
+        # Apply normalization
+        df["country_code"] = df["country_code"].apply(lambda x: normalize_country_code_value(x))
+        
+        # Count ISO-3 normalizations
+        iso3_patterns = {"CHL", "MEX", "PRY", "DEU", "PAN", "COL", "ITA", "FRA", "PER", "CAN", "SGP", "CHE", "LUX", "CYP", "CHN", "ECU", "URY", "TUR", "JPN", "AUS", "NZL", "KOR", "PRT", "THA", "ARE", "GTM", "LTU", "DOM", "POL", "IND", "HND", "CRI", "VEN", "MYS", "GRC", "EST", "JAM", "NIC", "AUT", "NOR", "FIN", "BEL", "DNK", "SAU", "SLV", "BGR", "SVK", "SRB", "PHL", "BRA", "ESP", "SWE", "ARG", "NLD", "BOL", "BOLIVIA"}
+        for val in before_values:
+            if pd.notna(val):
+                normalized = _normalize_text_token(val)
+                if normalized and normalized in iso3_patterns:
+                    stats["iso3_normalized_count"] += 1
+                elif normalized and len(normalized) <= 3 and normalized.endswith("BO") and normalized != "BO":
+                    stats["bolivia_dirty_normalized_count"] += 1
     else:
-        df["country_code"] = None
-
+        df["country_code"] = "UNKNOWN"
+    
+    # Country code distribution
+    try:
+        stats["country_code_distribution"] = df["country_code"].fillna("UNKNOWN").astype(str).value_counts().head(20).to_dict()
+    except Exception:
+        stats["country_code_distribution"] = {}
+    
+    # Define is_international logic
     def is_international(c):
-        if c is None or c == "" or str(c).upper() in ["NONE", "UNKNOWN"]:
-            return 0
-        if str(c).upper() in ["BO", "BOL", "BOLIVIA"]:
+        if c in {"UNKNOWN", "BO"}:
             return 0
         return 1
-
+    
     df["feature_international_transaction"] = df["country_code"].apply(is_international).astype(int)
+    df["is_international"] = df["feature_international_transaction"].astype(int)
+    
+    # Verify BO and UNKNOWN are not international
+    if "BO" in df["country_code"].values:
+        bo_rows = df[df["country_code"] == "BO"]
+        stats["bo_is_international_check"] = (bo_rows["is_international"] == 0).all()
+    
+    if "UNKNOWN" in df["country_code"].values:
+        unknown_rows = df[df["country_code"] == "UNKNOWN"]
+        stats["unknown_is_international_check"] = (unknown_rows["is_international"] == 0).all()
+    
+    return df, stats
+
+
+def generate_location_features(df: pd.DataFrame) -> pd.DataFrame:
+    df, _ = generate_location_features_with_stats(df)
     return df
 
 
@@ -459,6 +638,9 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
     # Convert data types
     df = convert_data_types(df)
 
+    # Normalize future rubro/MCC aliases into a single column
+    df = ensure_merchant_rubro_proxy(df)
+
     # Handle missing values
     df, missing_report = handle_missing_values(df)
     summary["missing_report"] = missing_report
@@ -506,7 +688,8 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
     df = generate_time_features(df)
 
     # Location features
-    df = generate_location_features(df)
+    df, location_stats = generate_location_features_with_stats(df)
+    summary["country_code_normalization"] = location_stats
 
     # Infer card presence
     df = infer_card_presence(df)
@@ -532,6 +715,15 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
     except Exception:
         # if behavioral features fail, ensure flow continues
         pass
+
+    # Track helper-only proxy columns for reporting but not output persistence
+    try:
+        if "_card_product_unknown" in df.columns:
+            summary["card_product_unknown_count"] = int(df["_card_product_unknown"].fillna(0).astype(int).sum())
+        else:
+            summary["card_product_unknown_count"] = 0
+    except Exception:
+        summary["card_product_unknown_count"] = 0
 
     # Ensure is_international column aligns with the computed feature
     try:

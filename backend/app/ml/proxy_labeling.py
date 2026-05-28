@@ -1,5 +1,6 @@
 import os
 import warnings
+import unicodedata
 import pandas as pd
 import numpy as np
 from typing import List
@@ -25,6 +26,38 @@ def normalize_response_code(value) -> str:
 
 
 _RESPONSE_HIGH = {"07": "HIGH_RISK_RESPONSE_CODE_07", "7": "HIGH_RISK_RESPONSE_CODE_07", "41": "LOST_CARD_CODE_41", "43": "STOLEN_CARD_CODE_43", "59": "SUSPECTED_FRAUD_CODE_59"}
+
+
+_COUNTRY_CODE_CANONICAL_MAP = {
+    "USA": "US",
+    "UNITED STATES": "US",
+    "ESTADOS UNIDOS": "US",
+    "GBR": "GB",
+    "IRL": "IE",
+    "BRA": "BR",
+    "ESP": "ES",
+    "SWE": "SE",
+    "ARG": "AR",
+    "NLD": "NL",
+    "BOL": "BO",
+    "BOLIVIA": "BO",
+}
+
+
+def _normalize_country_code(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "UNKNOWN"
+    try:
+        text = unicodedata.normalize("NFKD", str(value))
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = text.replace("\u00A0", " ").strip().upper()
+        text = " ".join(text.split())
+    except Exception:
+        text = str(value).replace("\u00A0", " ").strip().upper()
+        text = " ".join(text.split())
+    if text in {"", "NAN", "NONE", "NULL", "UNKNOWN"}:
+        return "UNKNOWN"
+    return _COUNTRY_CODE_CANONICAL_MAP.get(text, text)
 
 
 def _find_response_column(df: pd.DataFrame) -> str | None:
@@ -131,17 +164,15 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
 
     # location / international
     if "country_code" in df.columns:
-        df["country_code"] = df["country_code"].astype(str).str.strip().str.upper()
+        df["country_code"] = df["country_code"].apply(_normalize_country_code)
     elif "country" in df.columns:
-        df["country_code"] = df["country"].astype(str).str.strip().str.upper()
+        df["country_code"] = df["country"].apply(_normalize_country_code)
     else:
-        df["country_code"] = None
-    df["country_code"] = df["country_code"].replace({"NAN": None, "NONE": None, "UNKNOWN": None, "": None})
+        df["country_code"] = "UNKNOWN"
     df["is_international"] = df.get("is_international", 0)
     def _is_international(c):
-        if c is None or c == "" or str(c).upper() in ["NONE", "UNKNOWN"]:
-            return 0
-        if str(c).upper() in ["BO", "BOL", "BOLIVIA"]:
+        code = _normalize_country_code(c)
+        if code in ["UNKNOWN", "BO"]:
             return 0
         return 1
     df["feature_international_transaction"] = df["country_code"].apply(_is_international).astype(int)

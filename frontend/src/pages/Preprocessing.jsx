@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react'
-import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, getPreprocessingRunStages, downloadPreprocessingRun, deletePreprocessingRun, runPreprocessingTraining, previewFeatureSet, downloadFeatureSet, deleteFeatureSet, downloadFeatureSetReport } from '../services/api'
+import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, downloadPreprocessingRun, deletePreprocessingRun, downloadPreprocessingRunReport } from '../services/api'
 
 export default function Preprocessing(){
   const [msg,setMsg] = useState('')
@@ -11,7 +11,6 @@ export default function Preprocessing(){
   const [runs, setRuns] = useState([])
   const [runPreview, setRunPreview] = useState(null)
   const [loadingDatasets, setLoadingDatasets] = useState(false)
-  const [createdFeatureSet, setCreatedFeatureSet] = useState(null)
 
   const run = async ()=>{
     setMsg('Ejecutando...')
@@ -82,27 +81,7 @@ export default function Preprocessing(){
     setRunPreview({ loading: true })
     try{
       const p = await previewPreprocessingRun(id)
-      // fetch inferred stages for UI; if that fails, try to infer from preview 'after' rows
-      let stages = null
-      try{
-        const s = await getPreprocessingRunStages(id)
-        stages = s && s.stages ? s.stages : null
-      }catch(_){ stages = null }
-
-      if(!stages && p && p.after && Array.isArray(p.after) && p.after.length>0){
-        // infer basic stages from the previewed processed rows
-        const sample = p.after[0]
-        const hasAmountScaled = Object.prototype.hasOwnProperty.call(sample, 'amount_scaled')
-        const dummy_like = Object.keys(sample).some(c => c.includes('_') && !['is_fraud','fraud_label_reason'].includes(c))
-        stages = {
-          limpieza: 'COMPLETED',
-          normalizacion: hasAmountScaled ? 'COMPLETED' : 'COMPLETED',
-          codificacion: dummy_like ? 'COMPLETED' : 'PENDING',
-          smote: 'NOT_APPLIED',
-        }
-      }
-
-      setRunPreview({ loading: false, data: p, stages })
+      setRunPreview({ loading: false, data: p })
     }catch(e){ setRunPreview({ loading: false, error: e?.response?.data?.detail || e?.message || String(e) }) }
   }
 
@@ -122,6 +101,21 @@ export default function Preprocessing(){
     }
   }
 
+  const handleViewRunReport = async (id) => {
+    try{
+      const blob = await downloadPreprocessingRunReport(id)
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/markdown' }))
+      const tab = window.open('', '_blank', 'noopener,noreferrer')
+      if (tab) {
+        tab.location.href = url
+        tab.focus()
+      }
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    }catch(e){
+      alert('Error abriendo el reporte: ' + (e?.response?.data?.detail || e?.message || String(e)))
+    }
+  }
+
   const handleDeleteRun = async (id)=>{
     if(!window.confirm('¿Borrar run #' + id + '? Esta acción eliminará los archivos procesados.')) return
     try{
@@ -129,65 +123,6 @@ export default function Preprocessing(){
       await loadRuns()
       setMsg('Run ' + id + ' borrado')
     }catch(e){ setMsg('Error borrando run: ' + (e?.response?.data?.detail || e?.message || String(e))) }
-  }
-
-  const handleRunTraining = async (runId) => {
-    setMsg('Preparando datos para entrenamiento para run ' + runId + '...')
-    try{
-      const res = await runPreprocessingTraining(runId)
-      setMsg('Datos preparados para entrenamiento')
-      // If backend provided a validation report, show only the verdict to the user
-      const verdict = res?.report?.validation?.verdict || (res?.report ? 'CREATED' : 'NOT_READY')
-      try{ window.alert('Veredicto: ' + verdict) }catch(e){ /* ignore */ }
-      // store created feature set info for quick visualization
-      if(res && res.report && res.report.feature_set_id){
-        setCreatedFeatureSet({ id: res.report.feature_set_id, payload: res.report })
-      }
-    }catch(e){ setMsg('Error en fase B: ' + (e?.response?.data?.detail || e?.message || String(e))) }
-  }
-
-  const handlePreviewFeatureSet = async (id)=>{
-    try{
-      const p = await previewFeatureSet(id, 20)
-      setRunPreview({ loading:false, data: { run: { id: `feature_set_${id}`, status: 'CREATED' }, before: [], after: p.rows || [], stages: null } })
-    }catch(e){ alert('Error al obtener previsualización: ' + (e?.response?.data?.detail || e?.message || String(e))) }
-  }
-
-  const handleDownloadFeatureSet = async (id)=>{
-    try{
-      const blob = await downloadFeatureSet(id)
-      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/csv' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `feature_set_${id}.csv`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-    }catch(e){ alert('Error descargando el CSV: ' + (e?.response?.data?.detail || e?.message || String(e))) }
-  }
-
-  const handleDownloadFeatureSetReport = async (id) => {
-    try{
-      const blob = await downloadFeatureSetReport(id)
-      const url = window.URL.createObjectURL(new Blob([blob], { type: 'text/markdown' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `feature_set_${id}_preprocessing_report.md`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-    }catch(e){ alert('Error descargando el informe: ' + (e?.response?.data?.detail || e?.message || String(e))) }
-  }
-
-  const handleDeleteFeatureSet = async (id)=>{
-    if(!window.confirm('¿Borrar feature set #' + id + '?')) return
-    try{
-      await deleteFeatureSet(id)
-      setMsg('Feature set ' + id + ' borrado')
-      setCreatedFeatureSet(null)
-    }catch(e){ alert('Error borrando feature set: ' + (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
   return (
@@ -240,11 +175,11 @@ export default function Preprocessing(){
                       <td>{rr.processed_records}</td>
                       <td>{rr.removed_records}</td>
                       <td style={{display:'flex',gap:8}}>
-                          <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
-                          <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
-                        <button className="button" onClick={()=>handleRunTraining(rr.id)}>Preparación para entrenamiento</button>
-                          <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
-                        </td>
+                        <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
+                        <button className="button" onClick={()=>handleViewRunReport(rr.id)}>Ver reporte</button>
+                        <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
+                        <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -300,41 +235,12 @@ export default function Preprocessing(){
                   </tbody>
                 </table>
               </div>
-              <div style={{width:240}}>
-                <h5>Etapas</h5>
-                {!runPreview.stages && <div style={{fontSize:12,color:'#666'}}>No disponible</div>}
-                {runPreview.stages && (
-                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    {Object.entries(runPreview.stages).map(([k,v])=> (
-                      <div key={k} style={{display:'flex',justifyContent:'space-between'}}>
-                        <div style={{textTransform:'capitalize'}}>{k.replace('_',' ')}</div>
-                        <div style={{fontWeight:600}}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         )}
 
       </div>
-      <div style={{marginTop:10}} className="card">{msg || 'Presiona para ejecutar SMOTE y transformar datos'}</div>
-
-      {createdFeatureSet && (
-        <div style={{marginTop:12}} className="card">
-          <h3>Datos preparados para entrenamiento</h3>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <div>Feature set id: <strong>{createdFeatureSet.id}</strong></div>
-              <div style={{display:'flex',gap:8}}>
-              <button className="button" onClick={()=>handlePreviewFeatureSet(createdFeatureSet.id)}>Previsualizar</button>
-              <button className="button" onClick={()=>handleDownloadFeatureSet(createdFeatureSet.id)}>Descargar CSV</button>
-              <button className="button" onClick={()=>handleDownloadFeatureSetReport(createdFeatureSet.id)}>Descargar informe</button>
-              <button className="button danger" onClick={()=>handleDeleteFeatureSet(createdFeatureSet.id)}>Borrar</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div style={{marginTop:10}} className="card">{msg || 'Presiona para ejecutar limpieza, normalización y anonimización'}</div>
 
       {showResultModal && (
         <div style={{position:'fixed',left:0,top:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}} onClick={()=>setShowResultModal(false)}>
