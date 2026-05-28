@@ -53,6 +53,11 @@ $env:DATABASE_URL = "postgresql://protouser:protopass@127.0.0.1:5432/protodb"
 .\.venv\Scripts\python.exe -m backend.app.init_db
 ```
 
+- Ejecutar tests por interprete de venv (raiz de repo):
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+```
 - Ejecutar tests dentro del contenedor (rápido y fiable):
 
 ```bash

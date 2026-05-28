@@ -135,10 +135,10 @@ export default function Preprocessing(){
     setMsg('Preparando datos para entrenamiento para run ' + runId + '...')
     try{
       const res = await runPreprocessingTraining(runId)
-      setMsg('Datos preparados para entrenamiento: ' + (res?.report ? `feature_set_id=${res.report.feature_set_id}` : 'OK'))
-      setResultDetails(res)
-      setShowResultDetailsJson(true)
-      setShowResultModal(true)
+      setMsg('Datos preparados para entrenamiento')
+      // If backend provided a validation report, show only the verdict to the user
+      const verdict = res?.report?.validation?.verdict || (res?.report ? 'CREATED' : 'NOT_READY')
+      try{ window.alert('Veredicto: ' + verdict) }catch(e){ /* ignore */ }
       // store created feature set info for quick visualization
       if(res && res.report && res.report.feature_set_id){
         setCreatedFeatureSet({ id: res.report.feature_set_id, payload: res.report })

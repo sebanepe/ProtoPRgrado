@@ -52,7 +52,7 @@ def generate_response_code_signal(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-BEHAVIORAL_RISK_THRESHOLD = float(os.getenv("BEHAVIORAL_RISK_THRESHOLD", "0.60"))
+BEHAVIORAL_RISK_THRESHOLD = float(os.getenv("BEHAVIORAL_RISK_THRESHOLD", "0.15"))
 MIN_INDEPENDENT_RULE_GROUPS = int(os.getenv("MIN_INDEPENDENT_RULE_GROUPS", "3"))
 
 
@@ -130,9 +130,23 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
     df["feature_weekend_transaction"] = df["_weekday"].isin([5, 6]).astype(int)
 
     # location / international
-    df["country_code"] = df.get("country_code", df.get("country", None))
+    if "country_code" in df.columns:
+        df["country_code"] = df["country_code"].astype(str).str.strip().str.upper()
+    elif "country" in df.columns:
+        df["country_code"] = df["country"].astype(str).str.strip().str.upper()
+    else:
+        df["country_code"] = None
+    df["country_code"] = df["country_code"].replace({"NAN": None, "NONE": None, "UNKNOWN": None, "": None})
     df["is_international"] = df.get("is_international", 0)
-    df["feature_international_transaction"] = ((df["country_code"].fillna("") .str.upper().isin(["BO", "BOL"])==False) | (df["is_international"] == 1)).astype(int)
+    def _is_international(c):
+        if c is None or c == "" or str(c).upper() in ["NONE", "UNKNOWN"]:
+            return 0
+        if str(c).upper() in ["BO", "BOL", "BOLIVIA"]:
+            return 0
+        return 1
+    df["feature_international_transaction"] = df["country_code"].apply(_is_international).astype(int)
+    # align is_international with computed feature if present
+    df["is_international"] = df["feature_international_transaction"].astype(int)
 
     # frequency
     txs_day = df.groupby(["customer_hash", "_day_bucket"]).size()
@@ -144,26 +158,38 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
     # merchants distinct customers
     if "merchant_hash" not in df.columns:
         df["merchant_hash"] = None
-    df["_distinct_customers_merchant_day"] = df.groupby(["merchant_hash", "_day_bucket"])["customer_hash"].transform(lambda x: x.nunique())
-    df["_distinct_customers_merchant_hour"] = df.groupby(["merchant_hash", "_hour_bucket"])["customer_hash"].transform(lambda x: x.nunique())
-    df["feature_many_merchants_customer_day"] = (df["_distinct_customers_merchant_day"] >= 5).astype(int)
-    df["feature_many_merchants_customer_hour"] = (df["_distinct_customers_merchant_hour"] >= 3).astype(int)
+    merchant_vals = df["merchant_hash"].fillna("")
+    valid_merchants = (~merchant_vals.isin(["", "UNKNOWN_MERCHANT"]))
+    unique_valid = merchant_vals[valid_merchants].nunique()
+    if unique_valid <= 1:
+        df["feature_many_merchants_customer_day"] = 0
+        df["feature_many_merchants_customer_hour"] = 0
+    else:
+        df["_distinct_customers_merchant_day"] = df.groupby(["merchant_hash", "_day_bucket"])["customer_hash"].transform(lambda x: x.nunique())
+        df["_distinct_customers_merchant_hour"] = df.groupby(["merchant_hash", "_hour_bucket"])["customer_hash"].transform(lambda x: x.nunique())
+        df["feature_many_merchants_customer_day"] = (df["_distinct_customers_merchant_day"] >= 5).astype(int)
+        df["feature_many_merchants_customer_hour"] = (df["_distinct_customers_merchant_hour"] >= 3).astype(int)
 
     # card presence type
     df["pos_entry_mode"] = pd.to_numeric(df.get("pos_entry_mode", pd.NA), errors="coerce")
     if "has_pinblock" in df.columns:
-        df["has_pinblock"] = pd.to_numeric(df["has_pinblock"], errors="coerce").fillna(0).astype(int)
+        df["has_pinblock"] = pd.to_numeric(df["has_pinblock"], errors="coerce")
     else:
         df["has_pinblock"] = 0
+    if "has_pinblock_source" not in df.columns:
+        df["has_pinblock_source"] = "imputed"
     tp_set = {2,5,7,90,91}
     tnp_set = {10,81}
     def infer_presence(row):
         pem = row["pos_entry_mode"]
         has_pin = row["has_pinblock"]
+        src = row.get("has_pinblock_source", "imputed")
         try:
             if (not pd.isna(pem) and int(pem) in tp_set) or has_pin == 1:
                 return "TP"
-            if (not pd.isna(pem) and int(pem) in tnp_set) or has_pin == 0:
+            if (not pd.isna(pem) and int(pem) in tnp_set):
+                return "TNP"
+            if (not pd.isna(pem) and has_pin == 0 and src == "raw"):
                 return "TNP"
         except Exception:
             return "UNKNOWN"
@@ -175,10 +201,12 @@ def generate_behavioral_risk_features(df: pd.DataFrame, amount_threshold: float 
 
     # merchant / brand / product heuristics
     df["card_brand"] = df.get("card_brand", None)
-    # infer brand from masked_card when missing
+    # infer brand from masked_card/pan_card when missing
     if ("card_brand" not in df.columns) or df["card_brand"].isna().all():
         if "masked_card" in df.columns:
             df["card_brand"] = df["masked_card"].apply(_infer_card_brand_from_masked)
+        elif "pan_card" in df.columns:
+            df["card_brand"] = df["pan_card"].apply(_infer_card_brand_from_masked)
     df["card_product_proxy"] = df.get("card_product_proxy", None)
     if ("card_product_proxy" not in df.columns) or df["card_product_proxy"].isna().all():
         df["card_product_proxy"] = pd.Series(["UNKNOWN"] * len(df), index=df.index)

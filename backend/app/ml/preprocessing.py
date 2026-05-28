@@ -26,6 +26,14 @@ def fetch_transactions_df(db, dataset_id: int | None = None) -> pd.DataFrame:
                 "location": r.location,
                 "device_id": r.device_id,
                 "customer_hash": r.customer_hash,
+                "merchant_hash": r.merchant_hash,
+                "merchant_code": r.merchant_code,
+                "terminal_code": r.terminal_code,
+                "merchant_name": r.merchant_name,
+                "country_code": r.country_code,
+                "pos_entry_mode": r.pos_entry_mode,
+                "has_pinblock": r.has_pinblock,
+                "card_brand": r.card_brand,
                 "transaction_datetime": r.transaction_datetime,
                 "is_fraud": bool(r.is_fraud),
             }
@@ -50,8 +58,8 @@ def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
 
     mapping_candidates = {
         "tipo_transaccion": "transaction_type",
-        "categoria transaccion": "transaction_category",
-        "codigo de proceso": "process_code",
+        "categoria_transaccion": "transaction_category",
+        "codigo_de_proceso": "process_code",
         "tiene_pinblock": "has_pinblock",
         "numero_referencia": "reference_number",
         "codigo_autorizacion": "authorization_code",
@@ -60,6 +68,12 @@ def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
         "codigo_terminal": "terminal_code",
         "canal": "channel",
         "hora": "transaction_datetime",
+        "fecha": "transaction_datetime",
+        "fecha_transaccion": "transaction_datetime",
+        "fecha_operacion": "transaction_datetime",
+        "fecha_hora": "transaction_datetime",
+        "datetime": "transaction_datetime",
+        "timestamp": "transaction_datetime",
         "codigo_respuesta": "response_code",
         "tarjeta": "masked_card",
         "establecimiento": "merchant_name",
@@ -144,7 +158,19 @@ def convert_data_types(df: pd.DataFrame) -> pd.DataFrame:
 
     # has_pinblock to 0/1
     if "has_pinblock" in df.columns:
-        df["has_pinblock"] = df["has_pinblock"].apply(lambda x: 1 if str(x).strip().lower() in ["1","true","yes","y"] else 0 if pd.notna(x) else np.nan)
+        def _to_pin(x):
+            if pd.isna(x):
+                return np.nan
+            s = str(x).strip().lower()
+            if s in ["1", "true", "yes", "y"]:
+                return 1
+            if s in ["0", "false", "no", "n"]:
+                return 0
+            try:
+                return int(float(s))
+            except Exception:
+                return np.nan
+        df["has_pinblock"] = df["has_pinblock"].apply(_to_pin)
 
     # normalize country and currency codes to string
     for c in ["country_code", "currency_code"]:
@@ -179,10 +205,14 @@ def handle_missing_values(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         if col in df.columns:
             df[col] = df[col].fillna("UNKNOWN")
 
-    # merchant_hash
+    # merchant_hash hint (actual hashing happens later)
     if "merchant_hash" not in df.columns:
         if "merchant_code" in df.columns:
-            df["merchant_hash"] = df["merchant_code"].astype(str).fillna("UNKNOWN_MERCHANT")
+            df["merchant_hash"] = df["merchant_code"].astype(str)
+        elif "terminal_code" in df.columns:
+            df["merchant_hash"] = df["terminal_code"].astype(str)
+        elif "merchant_name" in df.columns:
+            df["merchant_hash"] = df["merchant_name"].astype(str)
         else:
             df["merchant_hash"] = "UNKNOWN_MERCHANT"
 
@@ -193,9 +223,14 @@ def handle_missing_values(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
             report["reasons"].append("dropped_missing_customer_hash")
             df = df.loc[~df.index.isin(df.index)] if df.empty else df
 
-    # has_pinblock impute
+    # has_pinblock impute (only when source is imputed)
     if "has_pinblock" in df.columns:
-        df["has_pinblock"] = df["has_pinblock"].fillna(0).astype(int)
+        if "has_pinblock_source" in df.columns:
+            mask_imputed = df["has_pinblock_source"] == "imputed"
+            if mask_imputed.any():
+                df.loc[mask_imputed, "has_pinblock"] = df.loc[mask_imputed, "has_pinblock"].fillna(0)
+        else:
+            df["has_pinblock"] = df["has_pinblock"].fillna(0)
     else:
         df["has_pinblock"] = 0
 
@@ -294,6 +329,8 @@ def generate_anonymized_keys(df: pd.DataFrame) -> pd.DataFrame:
     if "merchant_hash" not in df.columns:
         if "merchant_code" in df.columns:
             df["merchant_hash"] = df["merchant_code"].apply(lambda x: sha_prefix(x, 'merch') if pd.notna(x) else 'UNKNOWN_MERCHANT')
+        elif "terminal_code" in df.columns:
+            df["merchant_hash"] = df["terminal_code"].apply(lambda x: sha_prefix(x, 'merch') if pd.notna(x) else 'UNKNOWN_MERCHANT')
         elif "merchant_name" in df.columns:
             df["merchant_hash"] = df["merchant_name"].apply(lambda x: sha_prefix(x, 'merch') if pd.notna(x) else 'UNKNOWN_MERCHANT')
         else:
@@ -309,6 +346,8 @@ def generate_anonymized_keys(df: pd.DataFrame) -> pd.DataFrame:
                         return sha_prefix(name_val, 'merch')
                     return 'UNKNOWN_MERCHANT'
                 s = str(val).strip()
+                if s.upper() == "UNKNOWN_MERCHANT":
+                    return "UNKNOWN_MERCHANT"
                 if s.startswith('merch_'):
                     return s
                 # if looks like a code (mostly digits/letters short), hash it
@@ -342,14 +381,14 @@ def generate_time_features(df: pd.DataFrame) -> pd.DataFrame:
 def generate_location_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if "country_code" in df.columns:
-        df["country_code"] = df["country_code"].astype(str).str.strip().str.upper().replace({"NAN": None})
+        df["country_code"] = df["country_code"].astype(str).str.strip().str.upper().replace({"NAN": None, "NONE": None, "UNKNOWN": None, "": None})
     else:
         df["country_code"] = None
 
     def is_international(c):
         if c is None or c == "" or str(c).upper() in ["NONE", "UNKNOWN"]:
             return 0
-        if str(c).upper() in ["BO","BOL","BOLIVIA"]:
+        if str(c).upper() in ["BO", "BOL", "BOLIVIA"]:
             return 0
         return 1
 
@@ -363,17 +402,22 @@ def infer_card_presence(df: pd.DataFrame) -> pd.DataFrame:
     tnp_set = {10,81}
     df["pos_entry_mode"] = pd.to_numeric(df.get("pos_entry_mode", pd.NA), errors="coerce")
     if "has_pinblock" in df.columns:
-        df["has_pinblock"] = pd.to_numeric(df["has_pinblock"], errors="coerce").fillna(0).astype(int)
+        df["has_pinblock"] = pd.to_numeric(df["has_pinblock"], errors="coerce")
     else:
         df["has_pinblock"] = 0
+    if "has_pinblock_source" not in df.columns:
+        df["has_pinblock_source"] = "imputed"
 
     def infer_presence(row):
         pem = row.get("pos_entry_mode")
         has_pin = row.get("has_pinblock")
+        src = row.get("has_pinblock_source")
         try:
             if (not pd.isna(pem) and int(pem) in tp_set) or int(has_pin) == 1:
                 return "TP"
-            if (not pd.isna(pem) and int(pem) in tnp_set) or int(has_pin) == 0:
+            if (not pd.isna(pem) and int(pem) in tnp_set):
+                return "TNP"
+            if (not pd.isna(pem) and int(has_pin) == 0 and src == "raw"):
                 return "TNP"
         except Exception:
             return "UNKNOWN"
@@ -400,6 +444,12 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
     # Normalize column names
     df = normalize_column_names(df)
 
+    # Track has_pinblock provenance before any imputation
+    if "has_pinblock" in df.columns:
+        df["has_pinblock_source"] = "raw"
+    else:
+        df["has_pinblock_source"] = "imputed"
+
     # Validate minimal structure
     try:
         validate_minimum_columns(df)
@@ -419,6 +469,38 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
 
     # Generate anonymized keys
     df = generate_anonymized_keys(df)
+
+    # Infer card_brand from PAN/masked before removing sensitive columns
+    if "card_brand" not in df.columns or df["card_brand"].isna().all():
+        def _infer_brand(val):
+            try:
+                if pd.isna(val):
+                    return None
+                s = str(val).strip()
+                if not s:
+                    return None
+                for ch in s:
+                    if ch.isdigit():
+                        d = ch
+                        break
+                else:
+                    return None
+                if d == "4":
+                    return "VISA"
+                if d == "5":
+                    return "MASTERCARD"
+                if d == "6":
+                    return "DISCOVER_OR_OTHER"
+                return "UNKNOWN"
+            except Exception:
+                return None
+
+        if "pan_card" in df.columns:
+            df["card_brand"] = df["pan_card"].apply(_infer_brand)
+        elif "masked_card" in df.columns:
+            df["card_brand"] = df["masked_card"].apply(_infer_brand)
+        else:
+            df["card_brand"] = "UNKNOWN"
 
     # Time features
     df = generate_time_features(df)
@@ -559,7 +641,8 @@ def get_training_columns(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         'is_fraud_proxy', 'behavioral_risk_score', 'independent_rule_groups', 'label_source',
         'fraud_label_reason', 'risk_signal_reason', 'transaction_id', 'customer_hash', 'merchant_hash',
         'device_id', 'reference_number', 'authorization_code', 'merchant_code', 'terminal_code',
-        'pan_card', 'masked_card', 'PAN_TARJETA', 'TARJETA', 'merchant_name', 'transaction_datetime'
+        'pan_card', 'masked_card', 'PAN_TARJETA', 'TARJETA', 'merchant_name', 'transaction_datetime',
+        'has_pinblock_source'
     }
     exclude = exclude.union(extra_exclude)
 

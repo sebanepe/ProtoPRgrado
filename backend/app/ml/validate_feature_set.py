@@ -7,7 +7,16 @@ FORBIDDEN = set([
     "is_fraud_proxy", "behavioral_risk_score", "independent_rule_groups", "label_source", "fraud_label_reason", "risk_signal_reason",
     "transaction_id", "customer_hash", "merchant_hash", "device_id", "reference_number", "authorization_code", "merchant_code", "terminal_code",
     "pan_card", "masked_card", "PAN_TARJETA", "TARJETA",
+    "has_pinblock_source",
 ])
+
+DIST_COLUMNS = [
+    "country_code",
+    "pos_entry_mode",
+    "has_pinblock",
+    "card_presence_type",
+    "card_brand",
+]
 
 
 def validate(path: str):
@@ -31,21 +40,41 @@ def validate(path: str):
     # nulls per column
     nulls = df.isnull().sum().to_dict()
     report["nulls"] = nulls
-    # feature frequencies (for boolean-like columns)
-    freq_issues = {}
+    # feature frequencies
+    freq_high = {}
+    freq_full = {}
     for c in df.columns:
         try:
             vc = df[c].value_counts(normalize=True, dropna=False)
-            if (vc.iloc[0] >= 0.3) and (len(vc) > 1):
-                freq_issues[c] = float(vc.iloc[0])
+            if len(vc) == 0:
+                continue
+            top = float(vc.iloc[0])
+            if top >= 1.0:
+                freq_full[c] = top
+            if top >= 0.3 and len(vc) > 1:
+                freq_high[c] = top
         except Exception:
             continue
-    report["freq_high"] = freq_issues
+    report["freq_high"] = freq_high
+    report["freq_full"] = freq_full
+
+    # distributions for key columns
+    dist = {}
+    for c in DIST_COLUMNS:
+        if c in df.columns:
+            try:
+                dist[c] = df[c].value_counts(dropna=False).to_dict()
+            except Exception:
+                dist[c] = {}
+    report["distributions"] = dist
+
     # verdict
     if not report["has_is_fraud"] or report["n_classes"] <= 1:
         verdict = "NOT_READY"
     elif forbidden_present:
         verdict = "ONLY_UNSUPERVISED_RECOMMENDED"
+    elif freq_full:
+        verdict = "NOT_READY"
     else:
         verdict = "READY_FOR_SUPERVISED_TRAINING"
     report["verdict"] = verdict

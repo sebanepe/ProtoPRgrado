@@ -430,5 +430,6 @@ def run_preprocessing_for_training(db: Session, run_id: int | None = None, train
         "pipeline_path": pipeline_path,
         "feature_set_path": feature_set_path,
         "preprocessing_report_path": preprocessing_report_path,
+        "validation": vreport if 'vreport' in locals() else None,
     }
     return report
