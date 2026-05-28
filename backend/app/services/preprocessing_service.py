@@ -9,8 +9,11 @@ import pandas as pd
 from backend.app.models.models import Dataset
 from backend.app.database import SessionLocal
 
-# persistent processed folder inside project for training/artifacts (absolute path)
-PROJECT_PROCESSED_DIR = r"C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\data\processed"
+# persistent processed folder inside project for training/artifacts
+# Prefer env override so Docker and local paths stay consistent.
+PROJECT_PROCESSED_DIR = os.environ.get("PROJECT_PROCESSED_DIR") or os.path.join(
+    os.getcwd(), "data", "processed"
+)
 
 
 DEFAULT_OUTPUT = os.path.join("data", "processed", "preprocessed_transactions.csv")

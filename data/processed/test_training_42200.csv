@@ -1,3 +1,0 @@
-amount,feature_high_amount,feature_high_amount_1h,feature_high_amount_1d,feature_night_transaction,feature_weekend_transaction,country_code,is_international,feature_international_transaction,feature_many_customer_transactions_day,feature_many_customer_transactions_hour,merchant_hash,feature_many_merchants_customer_day,feature_many_merchants_customer_hour,pos_entry_mode,has_pinblock,card_presence_type,feature_tp_pem_07,feature_tnp_transaction,card_brand,card_product_proxy,feature_same_merchant_15_cards_by_brand,feature_same_merchant_20_cards_by_product_presence,feature_tnp_50_approved_by_product
-100,0,0,0,0,0,,0,1,0,0,,0,0,,0,TNP,0,1,,,0,0,0
-200,0,0,0,0,0,,0,1,0,0,,0,0,,0,TNP,0,1,,,0,0,0

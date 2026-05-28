@@ -1,3 +1,0 @@
-transaction_id,amount,transaction_datetime,response_code,normalized_response_code,response_high_risk,behavioral_risk_score,independent_rule_groups,label_source,customer_hash,merchant_hash,device_id,feature_high_amount,is_fraud
-t1,100,2026-05-20 10:00,59,59,1,0.8,3,response_code_proxy,c1,m1,d1,1,1
-t2,50,2026-05-20 11:00,0,0,0,0.0,0,no_proxy_risk_detected,c2,m2,d2,0,0

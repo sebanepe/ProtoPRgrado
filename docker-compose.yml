@@ -27,12 +27,15 @@ services:
     environment:
       DATABASE_URL: postgresql://protouser:protopass@db:5432/protodb
       PYTHONUNBUFFERED: '1'
+      DATASET_STORAGE: /app/data/uploads
+      PROJECT_PROCESSED_DIR: /app/data/processed
     depends_on:
       - db
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app/backend
+      - ./data:/app/data
 
 volumes:
   db_data:
