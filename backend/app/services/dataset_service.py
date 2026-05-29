@@ -11,6 +11,7 @@ from io import BytesIO
 import os
 from datetime import datetime
 import unicodedata
+import re
 
 
 REQUIRED_COLUMNS = {
@@ -37,6 +38,16 @@ COLUMN_ALIASES = {
     "transaction_datetime": ["transaction_datetime", "fecha", "date", "fecha_transaccion", "fecha_trans", "fecha_operacion", "datetime", "timestamp", "hora"],
     "is_fraud": ["is_fraud", "fraud", "es_fraude", "fraude", "label", "isfraud"],
     "country_code": ["country_code", "pais", "país", "country", "pais_name"],
+    "merchant_rubro_proxy": [
+        "merchant_rubro_proxy",
+        "mcc_code",
+        "codigo_mcc",
+        "mcc",
+        "rubro",
+        "codigo_rubro",
+        "merchant_category_code",
+        "categoria_comercio",
+    ],
     "merchant_code": ["merchant_code", "codigo_establecimiento", "codigo_estab", "merchant_id", "codigo"],
     "terminal_code": ["terminal_code", "codigo_terminal", "terminal", "terminal_id", "terminalcode"],
     "merchant_name": ["merchant_name", "establecimiento", "establishment", "merchant", "nombre_establecimiento"],
@@ -49,6 +60,76 @@ COLUMN_ALIASES = {
     "process_code": ["process_code", "codigo_proceso", "codigo_proceso"],
     "transaction_category": ["transaction_category", "categoria", "categoria_transaccion", "transaction_category"],
 }
+
+
+MERCHANT_RUBRO_SOURCE_ALIASES = {
+    "merchant_rubro_proxy",
+    "mcc_code",
+    "codigo_mcc",
+    "mcc",
+    "rubro",
+    "codigo_rubro",
+    "merchant_category_code",
+    "categoria_comercio",
+}
+
+
+def _normalize_column_key(value) -> str:
+    if not isinstance(value, str):
+        value = str(value)
+    value = unicodedata.normalize('NFKD', value)
+    value = ''.join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.lower()
+    value = re.sub(r'[^a-z0-9]+', '_', value).strip('_')
+    return value
+
+
+def _normalize_merchant_rubro_value(value) -> str:
+    if value is None or pd.isna(value):
+        return "UNKNOWN"
+    try:
+        text = str(value).strip()
+    except Exception:
+        text = str(value)
+    text = text.replace("\u00A0", " ").strip()
+    if not text:
+        return "UNKNOWN"
+    upper = text.upper()
+    if upper in {"NAN", "NONE", "NULL", "UNKNOWN"}:
+        return "UNKNOWN"
+    try:
+        numeric = pd.to_numeric(text.replace(",", "."), errors="coerce")
+        if not pd.isna(numeric):
+            if float(numeric).is_integer():
+                return str(int(numeric))
+            return str(float(numeric)).rstrip("0").rstrip(".")
+    except Exception:
+        pass
+    if upper.endswith(".0") and upper[:-2].isdigit():
+        return upper[:-2]
+    return " ".join(upper.split())
+
+
+def _pick_merchant_rubro_from_row(row) -> str:
+    for col in (
+        "merchant_rubro_proxy",
+        "mcc_code",
+        "codigo_mcc",
+        "mcc",
+        "rubro",
+        "codigo_rubro",
+        "merchant_category_code",
+        "categoria_comercio",
+    ):
+        if col not in row:
+            continue
+        value = row[col]
+        if isinstance(value, pd.Series):
+            value = value.dropna().iloc[0] if not value.dropna().empty else None
+        normalized = _normalize_merchant_rubro_value(value)
+        if normalized != "UNKNOWN":
+            return normalized
+    return "UNKNOWN"
 
 
 def _map_columns(df):
@@ -335,6 +416,11 @@ def import_dataset(db: Session, file, name: str, file_name: str):
                     return None
             chunk['has_pinblock'] = chunk['has_pinblock'].apply(to_pin)
 
+        if any(col in chunk.columns for col in MERCHANT_RUBRO_SOURCE_ALIASES):
+            chunk['merchant_rubro_proxy'] = chunk.apply(_pick_merchant_rubro_from_row, axis=1)
+        elif 'merchant_rubro_proxy' not in chunk.columns:
+            chunk['merchant_rubro_proxy'] = 'UNKNOWN'
+
         # generate hashes and deterministic transaction_id from composite key
         try:
             from backend.app.ml import preprocessing as mlp
@@ -417,6 +503,7 @@ def import_dataset(db: Session, file, name: str, file_name: str):
                     'device_id': row.get('device_id'),
                     'customer_hash': row.get('customer_hash'),
                     'merchant_hash': row.get('merchant_hash'),
+                    'merchant_rubro_proxy': row.get('merchant_rubro_proxy'),
                     'merchant_code': row.get('merchant_code'),
                     'terminal_code': row.get('terminal_code'),
                     'merchant_name': row.get('merchant_name'),
@@ -677,6 +764,11 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                         return None
                 chunk['has_pinblock'] = chunk['has_pinblock'].apply(to_pin)
 
+            if any(col in chunk.columns for col in MERCHANT_RUBRO_SOURCE_ALIASES):
+                chunk['merchant_rubro_proxy'] = chunk.apply(_pick_merchant_rubro_from_row, axis=1)
+            elif 'merchant_rubro_proxy' not in chunk.columns:
+                chunk['merchant_rubro_proxy'] = 'UNKNOWN'
+
             try:
                 from backend.app.ml import preprocessing as mlp
                 chunk = mlp.generate_anonymized_keys(chunk)
@@ -747,6 +839,7 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                         'device_id': row.get('device_id'),
                         'customer_hash': row.get('customer_hash'),
                         'merchant_hash': row.get('merchant_hash'),
+                        'merchant_rubro_proxy': row.get('merchant_rubro_proxy'),
                         'merchant_code': row.get('merchant_code'),
                         'terminal_code': row.get('terminal_code'),
                         'merchant_name': row.get('merchant_name'),

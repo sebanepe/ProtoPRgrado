@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes, feature_set_routes, system_log_routes
 from .config import settings
+from .init_db import ensure_transactions_merchant_rubro_column
 
 
 app = FastAPI(title="fraud-detection-system", version="0.1.0")
@@ -39,6 +40,11 @@ app.include_router(settings_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(feature_set_routes.router)
 app.include_router(system_log_routes.router)
+
+
+@app.on_event("startup")
+def ensure_runtime_schema_compatibility():
+    ensure_transactions_merchant_rubro_column()
 
 
 @app.get("/health", tags=["health"])

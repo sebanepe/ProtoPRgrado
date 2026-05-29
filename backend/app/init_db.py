@@ -17,7 +17,7 @@ from backend.app.database import engine
 from backend.app.services.auth_service import hash_password
 from backend.app.repositories.user_repository import get_user_by_email, create_user
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 PERMISSIONS = [
     ("dashboard.view", "dashboard", "view"),
@@ -95,6 +95,24 @@ DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "mariokart8$")
 
 def ensure_tables():
     Base.metadata.create_all(bind=engine)
+
+
+def ensure_transactions_merchant_rubro_column():
+    """Add merchant_rubro_proxy to transactions if the existing table lacks it."""
+    try:
+        inspector = inspect(engine)
+        columns = {column["name"] for column in inspector.get_columns("transactions")}
+    except Exception:
+        return
+
+    if "merchant_rubro_proxy" in columns:
+        return
+
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN merchant_rubro_proxy VARCHAR(20) NULL"))
+        else:
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_rubro_proxy VARCHAR(20) NULL"))
 
 
 def ensure_user_role_column():
@@ -205,6 +223,7 @@ def ensure_admin_user(session: Session, roles: dict):
 def main():
     try:
         ensure_tables()
+        ensure_transactions_merchant_rubro_column()
     except OperationalError as oe:
         msg = f"Could not connect to the database: {oe}\nEnsure your DATABASE_URL is correct and the DB is reachable."
         print(msg)

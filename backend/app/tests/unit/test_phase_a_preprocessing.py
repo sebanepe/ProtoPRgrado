@@ -1,4 +1,5 @@
 import pandas as pd
+from datetime import datetime
 
 from backend.app.ml.preprocessing import preprocess_dataframe
 from backend.app.ml.validate_cleaned_dataset import (
@@ -6,6 +7,9 @@ from backend.app.ml.validate_cleaned_dataset import (
     NOT_READY_VERDICT,
     validate,
 )
+from backend.app.repositories import transaction_repository
+from backend.app.models.models import Transaction
+from backend.app.services import preprocessing_service
 from backend.app.services.preprocessing_service import _phase_a_filter_columns
 
 
@@ -74,6 +78,48 @@ def test_merchant_rubro_proxy_from_rubro_and_mcc():
     assert cleaned.loc[1, "merchant_rubro_proxy"] == "6011"
 
 
+def test_merchant_rubro_proxy_numeric_aliases_and_source_columns_are_dropped():
+    df = pd.DataFrame(
+        [
+            {
+                "transaction_id": "tx-1",
+                "amount": 10,
+                "transaction_datetime": "2026-01-01T00:00:00",
+                "MCC_CODE": 6011.0,
+                "DESCRIPTION": "ATM",
+                "DESCRIPTION.1": "ATM-ALT",
+                "country_code": "BO",
+            },
+            {
+                "transaction_id": "tx-2",
+                "amount": 11,
+                "transaction_datetime": "2026-01-01T01:00:00",
+                "CODIGO_MCC": " 5812 ",
+                "merchant_rubro_description": "Retail",
+                "country_code": "BO",
+            },
+            {
+                "transaction_id": "tx-3",
+                "amount": 12,
+                "transaction_datetime": "2026-01-01T02:00:00",
+                "mcc": None,
+                "country_code": "BO",
+            },
+        ]
+    )
+
+    cleaned, summary = preprocess_dataframe(df)
+
+    assert list(cleaned["merchant_rubro_proxy"]) == ["6011", "5812", "UNKNOWN"]
+    assert "MCC_CODE" not in cleaned.columns
+    assert "CODIGO_MCC" not in cleaned.columns
+    assert "DESCRIPTION" not in cleaned.columns
+    assert "DESCRIPTION.1" not in cleaned.columns
+    assert "merchant_rubro_description" not in cleaned.columns
+    assert summary.get("merchant_rubro_source_present") is True
+    assert summary.get("merchant_rubro_valid_4digit_count") == 2
+
+
 def test_missing_rubro_defaults_to_unknown():
     df = pd.DataFrame(
         [
@@ -135,6 +181,91 @@ def test_validate_cleaned_dataset_rejects_forbidden_columns(tmp_path):
 
     assert report["verdict"] == NOT_READY_VERDICT
     assert "is_fraud" in report["forbidden_columns_present"]
+
+
+def test_validate_cleaned_dataset_rejects_lost_mcc_when_source_has_mcc(tmp_path):
+    source_df = pd.DataFrame(
+        [
+            {"transaction_id": "tx-1", "amount": 120.5, "transaction_datetime": "2026-01-01T10:00:00", "MCC_CODE": 6011},
+            {"transaction_id": "tx-2", "amount": 80.0, "transaction_datetime": "2026-01-01T11:00:00", "MCC_CODE": 5812},
+        ]
+    )
+    cleaned_df = pd.DataFrame(
+        [
+            {
+                "transaction_id": "tx-1",
+                "amount": 120.5,
+                "transaction_datetime": "2026-01-01T10:00:00",
+                "merchant_rubro_proxy": "UNKNOWN",
+            },
+            {
+                "transaction_id": "tx-2",
+                "amount": 80.0,
+                "transaction_datetime": "2026-01-01T11:00:00",
+                "merchant_rubro_proxy": "UNKNOWN",
+            },
+        ]
+    )
+
+    source_path = tmp_path / "source.csv"
+    cleaned_path = tmp_path / "preprocessed_run_99.csv"
+    source_df.to_csv(source_path, index=False)
+    cleaned_df.to_csv(cleaned_path, index=False)
+
+    report = validate(cleaned_path, source_path=source_path)
+
+    assert report["verdict"] == NOT_READY_VERDICT
+    assert any("MCC_CODE" in note for note in report["notes"])
+
+
+def test_transaction_repository_preserves_merchant_rubro_proxy(db_session):
+    inserted = transaction_repository.insert_transactions(
+        db_session,
+        [
+            {
+                "transaction_id": "tx-repo-1",
+                "amount": 25.0,
+                "transaction_datetime": datetime.utcnow(),
+                "merchant_rubro_proxy": "6011",
+                "is_fraud": False,
+            }
+        ],
+        dataset_id=None,
+    )
+
+    row = db_session.query(Transaction).filter(Transaction.transaction_id == "tx-repo-1").first()
+
+    assert inserted == 1
+    assert row is not None
+    assert row.merchant_rubro_proxy == "6011"
+
+
+def test_preprocessing_service_includes_merchant_rubro_proxy_from_db(db_session, tmp_path, monkeypatch):
+    db_session.add(
+        Transaction(
+            transaction_id="tx-db-1",
+            amount=33.0,
+            transaction_datetime=datetime.utcnow(),
+            merchant_rubro_proxy="5812",
+            country_code="BO",
+            is_fraud=False,
+        )
+    )
+    db_session.commit()
+
+    old_dir = preprocessing_service.PROJECT_PROCESSED_DIR
+    monkeypatch.setattr(preprocessing_service, "PROJECT_PROCESSED_DIR", str(tmp_path))
+    try:
+        summary = preprocessing_service.run_preprocessing(db_session, output_path="", apply_smote=False)
+        output_path = summary.get("project_output_path") or summary.get("output_path")
+        assert output_path
+        out_df = pd.read_csv(output_path)
+        assert "merchant_rubro_proxy" in out_df.columns
+        assert str(out_df.loc[0, "merchant_rubro_proxy"]) == "5812"
+        assert "is_fraud" not in out_df.columns
+        assert "confirmed_fraud" not in out_df.columns
+    finally:
+        monkeypatch.setattr(preprocessing_service, "PROJECT_PROCESSED_DIR", old_dir)
 
 
 def test_iso3_to_iso2_normalization_extended():

@@ -1,6 +1,7 @@
 import os
 import unicodedata
 import hashlib
+import re
 import pandas as pd
 import numpy as np
 from typing import Tuple, Dict
@@ -78,10 +79,29 @@ MERCANT_RUBRO_CANDIDATES = [
     "merchant_rubro_proxy",
     "rubro",
     "mcc",
+    "mcc_code",
     "merchant_category_code",
     "codigo_rubro",
+    "codigo_mcc",
     "categoria_comercio",
 ]
+
+MERCANT_RUBRO_SOURCE_COLUMNS = {
+    "rubro",
+    "mcc",
+    "mcc_code",
+    "merchant_category_code",
+    "codigo_rubro",
+    "codigo_mcc",
+    "categoria_comercio",
+}
+
+MERCANT_RUBRO_RAW_DROP_COLUMNS = MERCANT_RUBRO_SOURCE_COLUMNS | {
+    "merchant_rubro_description",
+    "description",
+    "description_1",
+    "response_description",
+}
 
 
 def _normalize_text_token(value) -> str | None:
@@ -97,6 +117,16 @@ def _normalize_text_token(value) -> str | None:
         text = str(value).replace("\u00A0", " ").strip().upper()
         text = " ".join(text.split())
         return text or None
+
+
+def _normalize_column_key(value) -> str:
+    if not isinstance(value, str):
+        value = str(value)
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
+    return value
 
 
 def normalize_country_code_value(value) -> str:
@@ -122,6 +152,18 @@ def normalize_merchant_rubro_value(value) -> str:
     normalized = _normalize_text_token(value)
     if normalized is None or normalized in {"", "NAN", "NONE", "NULL", "UNKNOWN"}:
         return "UNKNOWN"
+    try:
+        numeric = pd.to_numeric(str(value).strip().replace(",", "."), errors="coerce")
+        if not pd.isna(numeric):
+            if float(numeric).is_integer():
+                return str(int(numeric))
+            return str(float(numeric)).rstrip("0").rstrip(".")
+    except Exception:
+        pass
+
+    if normalized.endswith(".0") and normalized[:-2].isdigit():
+        return normalized[:-2]
+
     return normalized
 
 
@@ -165,6 +207,7 @@ def fetch_transactions_df(db, dataset_id: int | None = None) -> pd.DataFrame:
                 "merchant_code": r.merchant_code,
                 "terminal_code": r.terminal_code,
                 "merchant_name": r.merchant_name,
+                "merchant_rubro_proxy": r.merchant_rubro_proxy,
                 "country_code": r.country_code,
                 "pos_entry_mode": r.pos_entry_mode,
                 "has_pinblock": r.has_pinblock,
@@ -620,6 +663,10 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
         return pd.DataFrame(), summary
 
     df = df.copy()
+    original_columns = list(df.columns)
+    merchant_rubro_source_columns = [c for c in original_columns if _normalize_column_key(c) in MERCANT_RUBRO_SOURCE_COLUMNS]
+    summary["merchant_rubro_source_present"] = bool(merchant_rubro_source_columns)
+    summary["merchant_rubro_source_columns"] = merchant_rubro_source_columns
     # Normalize column names
     df = normalize_column_names(df)
 
@@ -640,6 +687,12 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
 
     # Normalize future rubro/MCC aliases into a single column
     df = ensure_merchant_rubro_proxy(df)
+
+    # Drop raw rubro/MCC source aliases and description variants so the Phase A
+    # output only keeps the canonical merchant_rubro_proxy column.
+    raw_drop_cols = [c for c in df.columns if _normalize_column_key(c) in MERCANT_RUBRO_RAW_DROP_COLUMNS and c != "merchant_rubro_proxy"]
+    if raw_drop_cols:
+        df = df.drop(columns=raw_drop_cols, errors="ignore")
 
     # Handle missing values
     df, missing_report = handle_missing_values(df)
@@ -731,6 +784,22 @@ def preprocess_dataframe(df: pd.DataFrame, apply_smote: bool = False) -> Tuple[p
             df["is_international"] = df["feature_international_transaction"].astype(int)
     except Exception:
         pass
+
+    # Merchant rubro diagnostics for reporting and validation
+    try:
+        if "merchant_rubro_proxy" in df.columns:
+            rubro_series = df["merchant_rubro_proxy"].fillna("UNKNOWN").astype(str).str.strip().replace({"": "UNKNOWN"})
+            summary["merchant_rubro_unknown_count"] = int((rubro_series == "UNKNOWN").sum())
+            summary["merchant_rubro_valid_4digit_count"] = int(rubro_series.str.fullmatch(r"\d{4}").fillna(False).sum())
+            summary["merchant_rubro_distribution"] = rubro_series.value_counts(dropna=False).head(20).to_dict()
+        else:
+            summary["merchant_rubro_unknown_count"] = 0
+            summary["merchant_rubro_valid_4digit_count"] = 0
+            summary["merchant_rubro_distribution"] = {}
+    except Exception:
+        summary["merchant_rubro_unknown_count"] = 0
+        summary["merchant_rubro_valid_4digit_count"] = 0
+        summary["merchant_rubro_distribution"] = {}
 
     # Calculate behavioral score and independent groups for diagnostics
     try:

@@ -75,6 +75,10 @@ def _write_phase_a_report(report_path: str, source_label: str, source_columns: l
     card_product_unknown_count = int(summary.get("card_product_unknown_count", 0) or 0)
     rubro_unknown_count = int(rubro_counts.get("UNKNOWN", 0)) if not rubro_counts.empty else 0
     rubro_warning = len(cleaned_df) > 0 and rubro_unknown_count == len(cleaned_df)
+    merchant_rubro_source_present = bool(summary.get("merchant_rubro_source_present", False))
+    merchant_rubro_source_columns = summary.get("merchant_rubro_source_columns", []) or []
+    merchant_rubro_valid_4digit_count = int(summary.get("merchant_rubro_valid_4digit_count", 0) or 0)
+    merchant_rubro_distribution = summary.get("merchant_rubro_distribution", {}) or {}
     
     # Extract country_code normalization statistics
     cc_normalization = summary.get("country_code_normalization", {})
@@ -111,6 +115,16 @@ def _write_phase_a_report(report_path: str, source_label: str, source_columns: l
         f.write(f"- merchant_hash_unique: {unique_merchant_hash}\n")
         if rubro_warning:
             f.write("- warning: El dataset no contiene RUBRO/MCC; las reglas basadas en rubro serán omitidas en Fase B.\n")
+
+        f.write("\n## Merchant Rubro Proxy\n")
+        f.write(f"- source_columns_detected: {merchant_rubro_source_columns}\n")
+        f.write(f"- valid_mcc_4digit_count: {merchant_rubro_valid_4digit_count}\n")
+        f.write(f"- unknown_count: {rubro_unknown_count}\n")
+        f.write(f"- top_20_merchant_rubro_proxy: {merchant_rubro_distribution if merchant_rubro_distribution else rubro_counts.head(20).to_dict()}\n")
+        if merchant_rubro_source_present and rubro_warning:
+            f.write("- error: El archivo de origen contiene MCC_CODE, pero no se preservó ningún código MCC válido en merchant_rubro_proxy.\n")
+        elif rubro_warning:
+            f.write("- warning: merchant_rubro_proxy quedó 100 % UNKNOWN.\n")
         
         # Country code normalization section
         f.write("\n## Country Code Normalization\n")

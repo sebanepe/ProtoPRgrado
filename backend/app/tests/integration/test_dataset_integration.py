@@ -1,6 +1,8 @@
 import io
 import csv
 
+from backend.app.models.models import Transaction
+
 
 def _make_csv_bytes(rows, cols):
     b = io.StringIO()
@@ -11,7 +13,7 @@ def _make_csv_bytes(rows, cols):
     return b.getvalue().encode("utf-8")
 
 
-def test_import_valid_csv_integration(test_client, sample_transactions):
+def test_import_valid_csv_integration(test_client, sample_transactions, db_session):
     cols = [
         "transaction_id",
         "amount",
@@ -22,14 +24,24 @@ def test_import_valid_csv_integration(test_client, sample_transactions):
         "customer_hash",
         "transaction_datetime",
         "is_fraud",
+        "MCC_CODE",
     ]
-    b = _make_csv_bytes(sample_transactions, cols)
+    rows = []
+    for idx, row in enumerate(sample_transactions):
+        enriched = dict(row)
+        enriched["MCC_CODE"] = 6011.0 if idx == 0 else 5812
+        rows.append(enriched)
+    b = _make_csv_bytes(rows, cols)
     files = {"file": ("tx.csv", b, "text/csv")}
     r = test_client.post("/datasets/import", files=files)
     # endpoint may run synchronously (200/201) or enqueue background import (202)
     assert r.status_code in (200, 201, 202)
     details = r.json().get("details")
     assert details and details.get("total") == len(sample_transactions)
+
+    tx_row = db_session.query(Transaction).filter(Transaction.transaction_id.isnot(None)).order_by(Transaction.id.asc()).first()
+    assert tx_row is not None
+    assert tx_row.merchant_rubro_proxy in {"6011", "5812"}
 
 
 def test_import_invalid_csv_missing_columns(test_client):

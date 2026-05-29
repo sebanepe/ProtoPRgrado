@@ -47,6 +47,7 @@ class Transaction(Base):
     merchant_code = Column(String(100), nullable=True)
     terminal_code = Column(String(100), nullable=True)
     merchant_name = Column(String(255), nullable=True)
+    merchant_rubro_proxy = Column(String(20), nullable=True)
     country_code = Column(String(10), nullable=True)
     pos_entry_mode = Column(Integer, nullable=True)
     has_pinblock = Column(Integer, nullable=True)
