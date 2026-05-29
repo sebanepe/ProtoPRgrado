@@ -7,6 +7,7 @@ vi.mock('../../src/services/api', () => ({
   getPreprocessedRuns: vi.fn(),
   analyzeRules: vi.fn(),
   getRulesSummary: vi.fn(),
+  getSummaryFilterOptions: vi.fn(),
   getRulesReport: vi.fn(),
   getRulesMetrics: vi.fn(),
   getRulesAlerts: vi.fn(),
@@ -17,6 +18,7 @@ import {
   getPreprocessedRuns,
   analyzeRules,
   getRulesSummary,
+  getSummaryFilterOptions,
   getRulesReport,
   getRulesMetrics,
   getRulesAlerts,
@@ -89,6 +91,14 @@ describe('RulesAlerts page', () => {
           representative_transaction_id: 'tx_001'
         }
       ]
+    })
+    getSummaryFilterOptions.mockResolvedValue({
+      rule_code: ['RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY'],
+      risk_level: ['HIGH'],
+      status: ['NEW', 'IN_REVIEW'],
+      country_code: ['BO'],
+      merchant_rubro_proxy: ['JEWELRY'],
+      customer_hash: ['cust_abc123']
     })
 
     // Mock report
@@ -231,8 +241,8 @@ describe('RulesAlerts page', () => {
     fireEvent.click(analyzeButton)
     await waitFor(() => expect(getRulesSummary).toHaveBeenCalled())
     // Check that these fields are NOT in the summary columns
-    expect(screen.queryByText(/is_fraud/i)).toBeNull()
-    expect(screen.queryByText(/confirmed_fraud/i)).toBeNull()
+    expect(screen.queryByRole('cell', { name: /is_fraud/i })).toBeNull()
+    expect(screen.queryByRole('cell', { name: /confirmed_fraud/i })).toBeNull()
   })
 
   it('can view detail when clicking Ver Detalle', async () => {

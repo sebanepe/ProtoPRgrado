@@ -149,6 +149,10 @@ export async function getRulesSummary(runId, params = {}){
   return api.get('/api/rules/summary', { params: queryParams }).then(r=> r.data)
 }
 
+export async function getSummaryFilterOptions(runId){
+  return api.get('/api/rules/summary-filter-options', { params: { run_id: runId } }).then(r=> r.data)
+}
+
 export async function getRulesAlerts(runId, params = {}){
   const queryParams = { run_id: runId, ...params }
   return api.get('/api/rules/alerts', { params: queryParams }).then(r=> r.data)

@@ -329,3 +329,189 @@ def test_generate_alerts_from_preprocessed_csv_writes_expected_files(tmp_path):
     assert len(summary_df) == 1
     assert "is_fraud" not in summary_df.columns
     assert "confirmed_fraud" not in summary_df.columns
+
+
+def test_summary_includes_all_rule_codes_present_in_alerts():
+    alerts_df = pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000001",
+                "source_run": "26",
+                "transaction_id": "tx-1",
+                "customer_hash": "cust-1",
+                "transaction_datetime": "2026-05-28T10:00:00+00:00",
+                "amount": 100.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "7995",
+                "rule_code": "RULE_GAMBLING_MCC",
+                "rule_name": "Gambling MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.9,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000002",
+                "source_run": "26",
+                "transaction_id": "tx-2",
+                "customer_hash": "cust-1",
+                "transaction_datetime": "2026-05-28T10:10:00+00:00",
+                "amount": 30.0,
+                "country_code": "AR",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5411",
+                "rule_code": "RULE_VELOCITY_CARD_HOUR",
+                "rule_name": "Velocity Hour",
+                "risk_level": "MEDIUM",
+                "risk_score": 0.7,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000003",
+                "source_run": "26",
+                "transaction_id": "tx-3",
+                "customer_hash": "cust-2",
+                "transaction_datetime": "2026-05-28T11:00:00+00:00",
+                "amount": 40.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5999",
+                "rule_code": "RULE_CONTEXTUAL_HIGH_RISK_MCC_WITH_SIGNAL",
+                "rule_name": "Contextual MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.8,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000004",
+                "source_run": "26",
+                "transaction_id": "tx-4",
+                "customer_hash": "cust-3",
+                "transaction_datetime": "2026-05-28T12:00:00+00:00",
+                "amount": 20.0,
+                "country_code": "US",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double Country",
+                "risk_level": "HIGH",
+                "risk_score": 0.95,
+                "status": "NEW",
+            },
+        ]
+    )
+
+    summary_df = build_alert_summary_df(alerts_df)
+
+    alert_rules = set(alerts_df["rule_code"].astype(str))
+    summary_rules = set(summary_df["rule_code"].astype(str))
+    assert summary_rules == alert_rules
+    assert "RULE_GAMBLING_MCC" in summary_rules
+    assert "RULE_VELOCITY_CARD_HOUR" in summary_rules
+    assert "RULE_CONTEXTUAL_HIGH_RISK_MCC_WITH_SIGNAL" in summary_rules
+
+
+def test_summary_preserves_merchant_rubro_proxy_for_mcc_groupings():
+    alerts_df = pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000101",
+                "source_run": "26",
+                "transaction_id": "tx-101",
+                "customer_hash": "cust-mcc",
+                "transaction_datetime": "2026-05-28T10:00:00+00:00",
+                "amount": 100.0,
+                "country_code": "BO",
+                "merchant_rubro_proxy": "7995",
+                "rule_code": "RULE_GAMBLING_MCC",
+                "rule_name": "Gambling MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.91,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000102",
+                "source_run": "26",
+                "transaction_id": "tx-102",
+                "customer_hash": "cust-mcc",
+                "transaction_datetime": "2026-05-28T10:10:00+00:00",
+                "amount": 80.0,
+                "country_code": "BO",
+                "merchant_rubro_proxy": "7995",
+                "rule_code": "RULE_GAMBLING_MCC",
+                "rule_name": "Gambling MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.89,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000103",
+                "source_run": "26",
+                "transaction_id": "tx-103",
+                "customer_hash": "cust-mcc",
+                "transaction_datetime": "2026-05-28T10:20:00+00:00",
+                "amount": 120.0,
+                "country_code": "BO",
+                "merchant_rubro_proxy": "5944",
+                "rule_code": "RULE_JEWELRY_MCC_HIGH_AMOUNT",
+                "rule_name": "Jewelry MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.93,
+                "status": "NEW",
+            },
+        ]
+    )
+
+    summary_df = build_alert_summary_df(alerts_df)
+    gambling_rows = summary_df.loc[summary_df["rule_code"] == "RULE_GAMBLING_MCC"]
+
+    assert not gambling_rows.empty
+    assert set(gambling_rows["merchant_rubro_proxy"].astype(str)) == {"7995"}
+    assert all("7995" in str(value) for value in gambling_rows["merchant_rubro_values"].fillna(""))
+
+
+def test_summary_validator_accepts_generated_summary_with_multiple_rule_categories(tmp_path):
+    alerts_df = pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000201",
+                "source_run": "26",
+                "transaction_id": "tx-201",
+                "customer_hash": "cust-a",
+                "transaction_datetime": "2026-05-28T09:00:00+00:00",
+                "amount": 200.0,
+                "country_code": "BO",
+                "merchant_rubro_proxy": "7995",
+                "rule_code": "RULE_GAMBLING_MCC",
+                "rule_name": "Gambling MCC",
+                "risk_level": "HIGH",
+                "risk_score": 0.88,
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000202",
+                "source_run": "26",
+                "transaction_id": "tx-202",
+                "customer_hash": "cust-a",
+                "transaction_datetime": "2026-05-28T09:15:00+00:00",
+                "amount": 50.0,
+                "country_code": "AR",
+                "merchant_rubro_proxy": "5411",
+                "rule_code": "RULE_VELOCITY_CARD_HOUR",
+                "rule_name": "Velocity Hour",
+                "risk_level": "MEDIUM",
+                "risk_score": 0.72,
+                "status": "NEW",
+            },
+        ]
+    )
+
+    summary_df = build_alert_summary_df(alerts_df)
+    path = tmp_path / "alerts_summary_run_26.csv"
+    summary_df.to_csv(path, index=False)
+
+    report = validate_alert_summary(path)
+
+    assert report["verdict"] == SUMMARY_READY_VERDICT
+    assert report["missing_required_columns"] == []
+    assert report["forbidden_columns_present"] == []
