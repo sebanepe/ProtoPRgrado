@@ -128,4 +128,42 @@ export async function toggleUserStatus(id){ return api.post(`/users/${id}/toggle
 export async function getAlerts(filters){ return api.get('/alerts', { params: filters }).then(r=> r.data && r.data.alerts ? r.data.alerts : []) }
 export async function updateAlertStatus(alertId, status){ return api.patch(`/alerts/${alertId}/status`, null, { params: { status } }).then(r=> r.data) }
 export async function me(){ return api.get('/auth/me').then(r=> r.data).catch(()=>null) }
+
+// ============================================================
+// Phase B: Rules & Alerts API Functions
+// ============================================================
+export async function getPreprocessedRuns(){
+  return api.get('/api/rules/preprocessed-runs').then(r=> r.data)
+}
+
+export async function analyzeRules(preprocessedRunId, force = false, config = {}){
+  return api.post('/api/rules/analyze', {
+    preprocessed_run_id: preprocessedRunId,
+    force: force,
+    config: config
+  }).then(r=> r.data)
+}
+
+export async function getRulesSummary(runId, params = {}){
+  const queryParams = { run_id: runId, ...params }
+  return api.get('/api/rules/summary', { params: queryParams }).then(r=> r.data)
+}
+
+export async function getRulesAlerts(runId, params = {}){
+  const queryParams = { run_id: runId, ...params }
+  return api.get('/api/rules/alerts', { params: queryParams }).then(r=> r.data)
+}
+
+export async function getRuleAlertDetail(alertId, runId){
+  return api.get(`/api/rules/alerts/${alertId}`, { params: { run_id: runId } }).then(r=> r.data)
+}
+
+export async function getRulesReport(runId){
+  return api.get('/api/rules/report', { params: { run_id: runId } }).then(r=> r.data)
+}
+
+export async function getRulesMetrics(runId){
+  return api.get('/api/rules/metrics', { params: { run_id: runId } }).then(r=> r.data)
+}
+
 export default api
