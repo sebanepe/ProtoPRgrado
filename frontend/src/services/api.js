@@ -166,4 +166,43 @@ export async function getRulesMetrics(runId){
   return api.get('/api/rules/metrics', { params: { run_id: runId } }).then(r=> r.data)
 }
 
+// ============================================================
+// PHASE B.3: Alert Review API Functions
+// ============================================================
+
+export async function updateAlertReviewStatus(alertId, runId, newStatus, analystNotes = null){
+  return api.patch(`/api/rules/alerts/${alertId}/status`, {
+    run_id: runId,
+    new_status: newStatus,
+    analyst_notes: analystNotes,
+    reviewed_by: null
+  }).then(r=> r.data)
+}
+
+export async function updateSummaryAlertReviewStatus(summaryAlertId, runId, newStatus, analystNotes = null){
+  return api.patch(`/api/rules/summary/${summaryAlertId}/status`, {
+    run_id: runId,
+    new_status: newStatus,
+    analyst_notes: analystNotes,
+    reviewed_by: null
+  }).then(r=> r.data)
+}
+
+export async function getAlertReviewHistory(alertId, runId){
+  return api.get(`/api/rules/alerts/${alertId}/history`, {
+    params: { run_id: runId }
+  }).then(r=> r.data)
+}
+
+export async function getSummaryAlertReviewHistory(summaryAlertId, runId){
+  return api.get(`/api/rules/summary/${summaryAlertId}/history`, {
+    params: { run_id: runId }
+  }).then(r=> r.data)
+}
+
+export async function getAlertReviews(runId, params = {}){
+  const queryParams = { run_id: runId, ...params }
+  return api.get('/api/rules/reviews', { params: queryParams }).then(r=> r.data)
+}
+
 export default api

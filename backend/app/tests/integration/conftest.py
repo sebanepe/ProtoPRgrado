@@ -10,15 +10,30 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.database import Base, get_db
 from backend.app.main import app
+import os
+from backend.app.config import settings
 
 
-TEST_DATABASE_URL = "sqlite:///:memory:"
+# Build an engine appropriate for tests: prefer in-memory sqlite unless
+# `DATABASE_URL` points to a different DB (e.g., Postgres in Docker). When
+# using a real RDBMS for tests we will create the test schema at startup
+# and drop it at teardown. This logic only affects the test environment.
+# Safety: by default tests use an in-memory SQLite DB to avoid touching
+# any real databases (including Docker containers). To run integration
+# tests against the real configured `DATABASE_URL` set the environment
+# variable `TEST_USE_REAL_DB=1` before running pytest.
 
-engine = create_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+if os.environ.get("TEST_USE_REAL_DB") == "1":
+    TEST_DATABASE_URL = settings.database_url
+    engine = create_engine(TEST_DATABASE_URL, connect_args={"connect_timeout": 5}, pool_pre_ping=True)
+else:
+    TEST_DATABASE_URL = "sqlite:///:memory:"
+    engine = create_engine(
+        TEST_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -26,10 +41,18 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def prepare_database():
     # ensure all models are imported so Base metadata is populated
     import backend.app.models.models  # noqa: F401
-    # create all tables in test DB
+
+    # create all tables in the test database; safe for in-memory sqlite
+    # and for ephemeral test DBs (Docker container). We avoid dropping
+    # anything in a production DB because tests should point to an
+    # isolated test database.
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
+    try:
+        Base.metadata.drop_all(bind=engine)
+    except Exception:
+        # best-effort cleanup; don't raise during teardown
+        pass
 
 
 def _override_get_db():

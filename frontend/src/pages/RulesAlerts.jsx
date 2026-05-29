@@ -8,7 +8,11 @@ import {
   getRulesReport,
   getRulesMetrics,
   getRulesAlerts,
-  getRuleAlertDetail
+  getRuleAlertDetail,
+  updateAlertReviewStatus,
+  updateSummaryAlertReviewStatus,
+  getAlertReviewHistory,
+  getSummaryAlertReviewHistory
 } from '../services/api'
 
 const getRunId = (run) => run?.run_id ?? run?.id ?? null
@@ -98,6 +102,15 @@ export default function RulesAlerts() {
     merchant_rubro_proxy: '',
     customer_hash: ''
   })
+
+  // PHASE B.3: State for alert review
+  const [reviewHistory, setReviewHistory] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [showHistoryTab, setShowHistoryTab] = useState(false)
+  const [selectedStatusForUpdate, setSelectedStatusForUpdate] = useState('IN_REVIEW')
+  const [analystNotes, setAnalystNotes] = useState('')
+  const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [reviewMsg, setReviewMsg] = useState('')
 
   // State for detail modal
   const [showDetailModal, setShowDetailModal] = useState(false)
@@ -280,6 +293,66 @@ export default function RulesAlerts() {
       setAnalysisMsg('Error al reprocesar: ' + (e?.response?.data?.detail || e?.message || String(e)))
     } finally {
       setAnalyzing(false)
+    }
+  }
+
+  // PHASE B.3: Load review history for alert
+  const loadReviewHistory = async (alert) => {
+    setLoadingHistory(true)
+    setReviewMsg('')
+    try {
+      const runId = getRunId(selectedRun)
+      if (alert.summary_alert_id) {
+        const history = await getSummaryAlertReviewHistory(alert.summary_alert_id, runId)
+        setReviewHistory(history.history || [])
+      } else if (alert.alert_id) {
+        const history = await getAlertReviewHistory(alert.alert_id, runId)
+        setReviewHistory(history.history || [])
+      }
+    } catch (e) {
+      console.error('Error loading review history:', e)
+      setReviewHistory([])
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  // PHASE B.3: Update alert status
+  const handleUpdateAlertStatus = async () => {
+    if (!selectedAlert || !selectedRun) return
+    if (!selectedStatusForUpdate) {
+      setReviewMsg('Por favor selecciona un estado')
+      return
+    }
+
+    setUpdatingStatus(true)
+    setReviewMsg('Actualizando estado...')
+    try {
+      const runId = getRunId(selectedRun)
+      if (selectedAlert.summary_alert_id) {
+        await updateSummaryAlertReviewStatus(
+          selectedAlert.summary_alert_id,
+          runId,
+          selectedStatusForUpdate,
+          analystNotes
+        )
+      } else if (selectedAlert.alert_id) {
+        await updateAlertReviewStatus(
+          selectedAlert.alert_id,
+          runId,
+          selectedStatusForUpdate,
+          analystNotes
+        )
+      }
+      setReviewMsg(`✓ Estado actualizado a ${selectedStatusForUpdate}`)
+      // Reload history
+      await loadReviewHistory(selectedAlert)
+      // Reload summary to show updated status
+      await loadSummary(pagination.page)
+    } catch (e) {
+      setReviewMsg('Error al actualizar estado: ' + (e?.response?.data?.detail || e?.message || String(e)))
+    } finally {
+      setUpdatingStatus(false)
     }
   }
 
@@ -511,8 +584,10 @@ export default function RulesAlerts() {
               >
                 <option value="">-- Todos --</option>
                 <option value="NEW">Nuevo</option>
-                <option value="UNDER_REVIEW">En Revisión</option>
-                <option value="RESOLVED">Resuelto</option>
+                <option value="IN_REVIEW">En Revisión</option>
+                <option value="DISMISSED">Desestimado</option>
+                <option value="FALSE_POSITIVE">Falso Positivo</option>
+                <option value="CONFIRMED_FRAUD">Fraude Confirmado</option>
               </select>
             </div>
             <div className="form-row">
@@ -585,7 +660,7 @@ export default function RulesAlerts() {
                       {summaryColumns.map(col => (
                         <td key={col.key}>{row[col.key] || 'N/A'}</td>
                       ))}
-                      <td>
+                      <td style={{ display: 'flex', gap: 6 }}>
                         <button
                           className="button"
                           onClick={() => handleViewDetail(row)}
@@ -706,12 +781,121 @@ export default function RulesAlerts() {
                     <td>{selectedAlert.merchant_rubro_proxy || 'N/A'}</td>
                   </tr>
                   <tr>
-                    <td style={{ fontWeight: 'bold' }}>Estado:</td>
-                    <td>{selectedAlert.status || 'NEW'}</td>
+                    <td style={{ fontWeight: 'bold' }}>Estado Actual:</td>
+                    <td style={{ fontWeight: 'bold', color: selectedAlert.status === 'CONFIRMED_FRAUD' ? '#dc2626' : '#2563eb' }}>
+                      {selectedAlert.status || 'NEW'}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
+
+            {/* PHASE B.3: Status Update Section */}
+            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
+              <h4>Revisión Humana - Cambiar Estado</h4>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+                ⚠️ Confirmar fraude es una decisión del analista. El sistema no confirma fraude automáticamente.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div className="form-row">
+                  <label>Nuevo Estado:</label>
+                  <select
+                    className="input"
+                    value={selectedStatusForUpdate}
+                    onChange={(e) => setSelectedStatusForUpdate(e.target.value)}
+                  >
+                    <option value="NEW">Nuevo</option>
+                    <option value="IN_REVIEW">En Revisión</option>
+                    <option value="DISMISSED">Desestimado</option>
+                    <option value="FALSE_POSITIVE">Falso Positivo</option>
+                    <option value="CONFIRMED_FRAUD">Fraude Confirmado (Manual)</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-row" style={{ marginBottom: 12 }}>
+                <label>Observaciones del Analista:</label>
+                <textarea
+                  className="input"
+                  placeholder="Escriba observaciones sobre esta alerta..."
+                  value={analystNotes}
+                  onChange={(e) => setAnalystNotes(e.target.value)}
+                  rows="3"
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button
+                  className="button"
+                  onClick={handleUpdateAlertStatus}
+                  disabled={updatingStatus}
+                  style={{ backgroundColor: updatingStatus ? '#ccc' : '#2563eb' }}
+                >
+                  {updatingStatus ? 'Guardando...' : 'Guardar Revisión'}
+                </button>
+                <button
+                  className="button"
+                  onClick={() => {
+                    setShowHistoryTab(!showHistoryTab)
+                    if (!showHistoryTab) {
+                      loadReviewHistory(selectedAlert)
+                    }
+                  }}
+                  style={{ backgroundColor: '#6b7280' }}
+                >
+                  {showHistoryTab ? 'Ocultar' : 'Ver'} Historial
+                </button>
+              </div>
+              {reviewMsg && (
+                <div style={{
+                  padding: 12,
+                  backgroundColor: reviewMsg.includes('Error') ? '#fee2e2' : '#ecfdf5',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: reviewMsg.includes('Error') ? '#991b1b' : '#065f46'
+                }}>
+                  {reviewMsg}
+                </div>
+              )}
+            </div>
+
+            {/* Review History */}
+            {showHistoryTab && (
+              <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f9fafb', borderRadius: 6 }}>
+                <h4>Historial de Revisiones</h4>
+                {loadingHistory && <div>Cargando historial...</div>}
+                {!loadingHistory && reviewHistory.length === 0 && (
+                  <div style={{ fontSize: 12, color: '#666' }}>No hay revisiones previas para esta alerta.</div>
+                )}
+                {!loadingHistory && reviewHistory.length > 0 && (
+                  <table className="table" style={{ fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Estado Anterior</th>
+                        <th>Nuevo Estado</th>
+                        <th>Observaciones</th>
+                        <th>Revisor ID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reviewHistory.map((entry, idx) => (
+                        <tr key={idx}>
+                          <td>{new Date(entry.reviewed_at).toLocaleString()}</td>
+                          <td>{entry.previous_status || 'N/A'}</td>
+                          <td style={{ fontWeight: 'bold', color: entry.new_status === 'CONFIRMED_FRAUD' ? '#dc2626' : '#2563eb' }}>
+                            {entry.new_status}
+                          </td>
+                          <td style={{ maxWidth: 250, wordBreak: 'break-word', fontSize: 11 }}>
+                            {entry.analyst_notes || '-'}
+                          </td>
+                          <td>{entry.reviewed_by_id || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
 
             {/* Detail Transactions */}
             <div>

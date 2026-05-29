@@ -8,19 +8,25 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, Depends
+from sqlalchemy.orm import Session
 
+from backend.app.database import get_db
 from backend.app.schemas.rules import (
     AlertItem,
     AlertSummaryItem,
+    AlertStatusUpdateRequest,
+    AlertStatusUpdateResponse,
+    AlertReviewHistoryResponse,
     PaginatedAlertSummaryResponse,
     PaginatedAlertsResponse,
+    PaginatedReviewsResponse,
     RuleAnalyzeRequest,
     RuleAnalyzeResponse,
     RuleMetricsResponse,
     RunListItem,
 )
-from backend.app.services import rule_engine_service
+from backend.app.services import rule_engine_service, rule_alert_review_service
 
 
 router = APIRouter(prefix="/api/rules", tags=["rules", "alert_rules", "fraud_rules"])
@@ -199,6 +205,7 @@ def get_summary(
     country_code: Optional[str] = Query(None),
     merchant_rubro_proxy: Optional[str] = Query(None),
     customer_hash: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ) -> PaginatedAlertSummaryResponse:
     df = _load_csv(_summary_file(run_id))
     filters = {
@@ -211,13 +218,18 @@ def get_summary(
     }
     filtered = _apply_filters(df, filters, allowed_missing={"country_code", "merchant_rubro_proxy"})
     page_df, safe_page, safe_page_size, total_pages = _paginate(filtered, page, page_size)
+    
+    # Clean records and merge with review status from DB
+    records = _clean_records(page_df)
+    merged_records = rule_alert_review_service.merge_items_with_reviews(db, run_id, records, is_summary=True)
+    
     return PaginatedAlertSummaryResponse(
         run_id=run_id,
         page=safe_page,
         page_size=safe_page_size,
         total_items=int(len(filtered)),
         total_pages=total_pages,
-        items=[AlertSummaryItem(**row) for row in _clean_records(page_df)],
+        items=[AlertSummaryItem(**row) for row in merged_records],
     )
 
 
@@ -234,6 +246,7 @@ def get_alerts(
     merchant_rubro_proxy: Optional[str] = Query(None),
     customer_hash: Optional[str] = Query(None),
     transaction_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ) -> PaginatedAlertsResponse:
     df = _load_csv(_alerts_file(run_id))
     filters = {
@@ -248,18 +261,23 @@ def get_alerts(
     }
     filtered = _apply_filters(df, filters)
     page_df, safe_page, safe_page_size, total_pages = _paginate(filtered, page, page_size)
+    
+    # Clean records and merge with review status from DB
+    records = _clean_records(page_df)
+    merged_records = rule_alert_review_service.merge_items_with_reviews(db, run_id, records, is_summary=False)
+    
     return PaginatedAlertsResponse(
         run_id=run_id,
         page=safe_page,
         page_size=safe_page_size,
         total_items=int(len(filtered)),
         total_pages=total_pages,
-        items=[AlertItem(**row) for row in _clean_records(page_df)],
+        items=[AlertItem(**row) for row in merged_records],
     )
 
 
 @router.get("/alerts/{alert_id}", response_model=AlertItem)
-def get_alert_detail(alert_id: str, run_id: Optional[str] = Query(None)) -> AlertItem:
+def get_alert_detail(alert_id: str, run_id: Optional[str] = Query(None), db: Session = Depends(get_db)) -> AlertItem:
     if run_id:
         candidates = [_alerts_file(run_id)]
     else:
@@ -273,7 +291,13 @@ def get_alert_detail(alert_id: str, run_id: Optional[str] = Query(None)) -> Aler
             continue
         match = df.loc[df["alert_id"].astype(str) == str(alert_id)]
         if not match.empty:
-            return AlertItem(**_clean_records(match.head(1))[0])
+            record = _clean_records(match.head(1))[0]
+            # Determine run_id if not provided
+            if not run_id:
+                run_id = path.stem.replace("alerts_run_", "preprocessed_run_")
+            # Merge with review status
+            merged_record = rule_alert_review_service.merge_status_with_item(db, run_id, record, is_summary=False)
+            return AlertItem(**merged_record)
 
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
 
@@ -317,3 +341,189 @@ def get_metrics(run_id: str = Query(...)) -> RuleMetricsResponse:
         alerts_by_country=_counts(alerts_df, "country_code"),
         top_customers=top_customers,
     )
+
+
+# ============================================================
+# PHASE B.3: Human Review and Alert Status Management
+# ============================================================
+
+
+@router.patch("/alerts/{alert_id}/status", response_model=AlertStatusUpdateResponse)
+def update_alert_status(
+    alert_id: str,
+    request: AlertStatusUpdateRequest,
+    db: Session = Depends(get_db),
+) -> AlertStatusUpdateResponse:
+    """
+    Update the status of a detailed alert.
+    
+    Allowed statuses: NEW, IN_REVIEW, DISMISSED, FALSE_POSITIVE, CONFIRMED_FRAUD
+    Status changes are recorded in DB, original CSV files are never modified.
+    """
+    try:
+        result = rule_alert_review_service.create_or_update_alert_review(
+            db,
+            source_run=request.run_id,
+            rule_code="",  # Will be populated from CSV if needed
+            new_status=request.new_status,
+            alert_id=alert_id,
+            analyst_notes=request.analyst_notes,
+            reviewed_by_id=None,  # Can be integrated with auth system
+        )
+        return AlertStatusUpdateResponse(
+            status="OK",
+            alert_id=result["alert_id"],
+            run_id=result["source_run"],
+            new_status=result["new_status"],
+            reviewed_at=result["reviewed_at"],
+            message="Alert status updated successfully.",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.patch("/summary/{summary_alert_id}/status", response_model=AlertStatusUpdateResponse)
+def update_summary_alert_status(
+    summary_alert_id: str,
+    request: AlertStatusUpdateRequest,
+    db: Session = Depends(get_db),
+) -> AlertStatusUpdateResponse:
+    """
+    Update the status of a summary (grouped) alert.
+    
+    Allowed statuses: NEW, IN_REVIEW, DISMISSED, FALSE_POSITIVE, CONFIRMED_FRAUD
+    Status changes are recorded in DB, original CSV files are never modified.
+    """
+    try:
+        result = rule_alert_review_service.create_or_update_alert_review(
+            db,
+            source_run=request.run_id,
+            rule_code="",  # Will be populated from CSV if needed
+            new_status=request.new_status,
+            summary_alert_id=summary_alert_id,
+            analyst_notes=request.analyst_notes,
+            reviewed_by_id=None,  # Can be integrated with auth system
+        )
+        return AlertStatusUpdateResponse(
+            status="OK",
+            summary_alert_id=result["summary_alert_id"],
+            run_id=result["source_run"],
+            new_status=result["new_status"],
+            reviewed_at=result["reviewed_at"],
+            message="Summary alert status updated successfully.",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/alerts/{alert_id}/history", response_model=AlertReviewHistoryResponse)
+def get_alert_history(
+    alert_id: str,
+    run_id: str = Query(...),
+    db: Session = Depends(get_db),
+) -> AlertReviewHistoryResponse:
+    """Get review history for a detailed alert."""
+    try:
+        history = rule_alert_review_service.get_alert_review_history(db, run_id, alert_id=alert_id)
+        return AlertReviewHistoryResponse(
+            alert_id=alert_id,
+            run_id=run_id,
+            history=[
+                {
+                    "id": h["id"],
+                    "source_run": h["source_run"],
+                    "alert_id": h["alert_id"],
+                    "summary_alert_id": h["summary_alert_id"],
+                    "rule_code": h["rule_code"],
+                    "previous_status": h["previous_status"],
+                    "new_status": h["new_status"],
+                    "analyst_notes": h["analyst_notes"],
+                    "reviewed_by_id": h["reviewed_by_id"],
+                    "reviewed_at": h["reviewed_at"],
+                }
+                for h in history
+            ],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/summary/{summary_alert_id}/history", response_model=AlertReviewHistoryResponse)
+def get_summary_alert_history(
+    summary_alert_id: str,
+    run_id: str = Query(...),
+    db: Session = Depends(get_db),
+) -> AlertReviewHistoryResponse:
+    """Get review history for a summary (grouped) alert."""
+    try:
+        history = rule_alert_review_service.get_alert_review_history(db, run_id, summary_alert_id=summary_alert_id)
+        return AlertReviewHistoryResponse(
+            summary_alert_id=summary_alert_id,
+            run_id=run_id,
+            history=[
+                {
+                    "id": h["id"],
+                    "source_run": h["source_run"],
+                    "alert_id": h["alert_id"],
+                    "summary_alert_id": h["summary_alert_id"],
+                    "rule_code": h["rule_code"],
+                    "previous_status": h["previous_status"],
+                    "new_status": h["new_status"],
+                    "analyst_notes": h["analyst_notes"],
+                    "reviewed_by_id": h["reviewed_by_id"],
+                    "reviewed_at": h["reviewed_at"],
+                }
+                for h in history
+            ],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/reviews", response_model=PaginatedReviewsResponse)
+def list_reviews(
+    run_id: str = Query(...),
+    status: Optional[str] = Query(None, description="Filter by status: NEW, IN_REVIEW, DISMISSED, FALSE_POSITIVE, CONFIRMED_FRAUD"),
+    rule_code: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1),
+    db: Session = Depends(get_db),
+) -> PaginatedReviewsResponse:
+    """List all reviews for a run with optional filtering."""
+    try:
+        result = rule_alert_review_service.list_all_reviews(
+            db,
+            source_run=run_id,
+            status=status,
+            rule_code=rule_code,
+            page=page,
+            page_size=page_size,
+        )
+        return PaginatedReviewsResponse(
+            run_id=run_id,
+            page=result["page"],
+            page_size=result["page_size"],
+            total_items=result["total_items"],
+            total_pages=result["total_pages"],
+            items=[
+                {
+                    "id": item["id"],
+                    "source_run": item["source_run"],
+                    "alert_id": item["alert_id"],
+                    "summary_alert_id": item["summary_alert_id"],
+                    "rule_code": item["rule_code"],
+                    "previous_status": item.get("previous_status"),
+                    "new_status": item["new_status"],
+                    "analyst_notes": item["analyst_notes"],
+                    "reviewed_by_id": item["reviewed_by_id"],
+                    "reviewed_at": item["reviewed_at"],
+                }
+                for item in result["items"]
+            ],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

@@ -77,3 +77,62 @@ class RuleMetricsResponse(BaseModel):
     alerts_by_mcc: Dict[str, int]
     alerts_by_country: Dict[str, int]
     top_customers: List[Dict[str, Any]]
+
+
+# ============================================================
+# Alert Review Schemas (PHASE B.3)
+# ============================================================
+
+
+class AlertStatusUpdateRequest(BaseModel):
+    """Request to update alert status."""
+    run_id: str = Field(..., description="Source run ID")
+    new_status: str = Field(
+        ...,
+        description="New status: NEW, IN_REVIEW, DISMISSED, FALSE_POSITIVE, CONFIRMED_FRAUD"
+    )
+    analyst_notes: Optional[str] = Field(None, description="Optional notes from analyst")
+    reviewed_by: Optional[str] = Field(None, description="Analyst email/identifier")
+
+
+class AlertStatusUpdateResponse(BaseModel):
+    """Response after updating alert status."""
+    status: str = Field("OK", description="Operation status")
+    alert_id: Optional[str] = None
+    summary_alert_id: Optional[str] = None
+    run_id: str
+    new_status: str
+    reviewed_at: str
+    message: Optional[str] = None
+
+
+class AlertReviewHistoryItem(BaseModel):
+    """Single review history entry."""
+    id: int
+    source_run: str
+    alert_id: Optional[str] = None
+    summary_alert_id: Optional[str] = None
+    rule_code: str
+    previous_status: Optional[str] = None
+    new_status: str
+    analyst_notes: Optional[str] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_at: str
+
+
+class AlertReviewHistoryResponse(BaseModel):
+    """Response with review history for an alert."""
+    alert_id: Optional[str] = None
+    summary_alert_id: Optional[str] = None
+    run_id: str
+    history: List[AlertReviewHistoryItem]
+
+
+class PaginatedReviewsResponse(BaseModel):
+    """Paginated list of reviews."""
+    run_id: str
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
+    items: List[AlertReviewHistoryItem]
