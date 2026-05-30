@@ -116,6 +116,25 @@ def _comparison_section(score_frame: pd.DataFrame, source_run: str, output_dir: 
     return result
 
 
+def _resolve_report_metadata(feature_metadata: Dict[str, Any], source_run: str) -> Dict[str, Any]:
+    report_metadata = dict(feature_metadata)
+
+    resolved_source_run = report_metadata.get("source_run")
+    if not resolved_source_run or str(resolved_source_run).strip().lower() == "none":
+        resolved_source_run = str(source_run)
+
+    resolved_source_run_token = report_metadata.get("source_run_token")
+    if resolved_source_run_token is None or str(resolved_source_run_token).strip().lower() == "none":
+        token = normalize_run_token(resolved_source_run)
+        resolved_source_run_token = int(token) if token.isdigit() else token
+    elif isinstance(resolved_source_run_token, str) and resolved_source_run_token.isdigit():
+        resolved_source_run_token = int(resolved_source_run_token)
+
+    report_metadata["source_run"] = resolved_source_run
+    report_metadata["source_run_token"] = resolved_source_run_token
+    return report_metadata
+
+
 def _write_report(report_path: Path, feature_metadata: Dict[str, Any], score_frame: pd.DataFrame, model_name: str, contamination: float, comparison: Dict[str, Any]) -> None:
     def _simple_markdown_table(frame: pd.DataFrame) -> str:
         columns = list(frame.columns)
@@ -232,7 +251,8 @@ def train_unsupervised_anomaly(
 
     report_file = output_directory / f"anomaly_report_run_{run_token}.md"
     comparison = _comparison_section(score_frame, source_run, output_directory)
-    _write_report(report_file, feature_metadata, score_frame, model_name, contamination, comparison)
+    report_metadata = _resolve_report_metadata(feature_metadata, source_run)
+    _write_report(report_file, report_metadata, score_frame, model_name, contamination, comparison)
 
     model_path = models_directory / f"{model_name}_run_{run_token}.pkl"
     joblib.dump(pipeline, model_path)
