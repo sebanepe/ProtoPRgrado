@@ -1,0 +1,273 @@
+import React from 'react'
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
+
+vi.mock('../services/api')
+
+import App from '../App'
+import Models from '../pages/Models'
+import * as api from '../services/api'
+
+const runs = {
+  runs: [
+    {
+      anomaly_run_id: 'run_26',
+      source_run: 'preprocessed_run_26',
+      model_name: 'isolation_forest',
+      algorithm: 'isolation_forest',
+      anomaly_count: 5481,
+      anomaly_rate: 0.009999854,
+      created_at: '2026-05-30T00:33:18.268840+00:00',
+    },
+  ],
+}
+
+const metrics = {
+  run_id: 'run_26',
+  total_transactions: 548108,
+  anomaly_count: 5481,
+  anomaly_rate: 0.009999854,
+  model_name: 'unsupervised_anomaly_detection',
+  algorithm: 'isolation_forest',
+  contamination: 0.01,
+  anomalies_by_country: { BO: 3211, CL: 1052, AR: 832 },
+  anomalies_by_pos_entry_mode: { '5': 1821, '10': 1600, '81': 2060 },
+  anomalies_by_mcc: { '6011': 994, '7995': 950, UNKNOWN: 148 },
+  anomalies_by_hour: { '0': 10, '1': 12, '2': 15 },
+  top_customers_by_anomaly_count: [
+    { customer_hash: 'cust_1', count: 9 },
+    { customer_hash: 'cust_2', count: 7 },
+  ],
+}
+
+const scores = {
+  run_id: 'run_26',
+  page: 1,
+  page_size: 50,
+  total_items: 2,
+  total_pages: 1,
+  items: [
+    {
+      anomaly_run_id: 'anomaly_run_26',
+      source_run: 'preprocessed_run_26',
+      transaction_id: 'tx_1',
+      customer_hash: 'cust_1',
+      transaction_datetime: '2026-05-29T10:00:00Z',
+      amount: 250.42,
+      country_code: 'BO',
+      pos_entry_mode: '5',
+      has_pinblock: 1,
+      merchant_rubro_proxy: '6011',
+      anomaly_model_name: 'isolation_forest',
+      anomaly_score: 0.083118,
+      anomaly_rank: 1,
+      anomaly_flag: 1,
+      anomaly_percentile: 99.99,
+      created_at: '2026-05-30T00:33:18.268840+00:00',
+    },
+    {
+      anomaly_run_id: 'anomaly_run_26',
+      source_run: 'preprocessed_run_26',
+      transaction_id: 'tx_2',
+      customer_hash: 'cust_2',
+      transaction_datetime: '2026-05-29T11:00:00Z',
+      amount: 99.99,
+      country_code: 'CL',
+      pos_entry_mode: '10',
+      has_pinblock: 0,
+      merchant_rubro_proxy: '7995',
+      anomaly_model_name: 'isolation_forest',
+      anomaly_score: 0.062741,
+      anomaly_rank: 2,
+      anomaly_flag: 1,
+      anomaly_percentile: 99.97,
+      created_at: '2026-05-30T00:33:18.268840+00:00',
+    },
+  ],
+}
+
+const top = {
+  run_id: 'run_26',
+  limit: 20,
+  count: 2,
+  items: [
+    {
+      anomaly_run_id: 'anomaly_run_26',
+      source_run: 'preprocessed_run_26',
+      transaction_id: 'tx_1',
+      customer_hash: 'cust_1',
+      transaction_datetime: '2026-05-29T10:00:00Z',
+      amount: 250.42,
+      country_code: 'BO',
+      pos_entry_mode: '5',
+      has_pinblock: 1,
+      merchant_rubro_proxy: '6011',
+      anomaly_model_name: 'isolation_forest',
+      anomaly_score: 0.083118,
+      anomaly_rank: 1,
+      anomaly_flag: 1,
+      anomaly_percentile: 99.99,
+      created_at: '2026-05-30T00:33:18.268840+00:00',
+    },
+    {
+      anomaly_run_id: 'anomaly_run_26',
+      source_run: 'preprocessed_run_26',
+      transaction_id: 'tx_2',
+      customer_hash: 'cust_2',
+      transaction_datetime: '2026-05-29T11:00:00Z',
+      amount: 99.99,
+      country_code: 'CL',
+      pos_entry_mode: '10',
+      has_pinblock: 0,
+      merchant_rubro_proxy: '7995',
+      anomaly_model_name: 'isolation_forest',
+      anomaly_score: 0.062741,
+      anomaly_rank: 2,
+      anomaly_flag: 1,
+      anomaly_percentile: 99.97,
+      created_at: '2026-05-30T00:33:18.268840+00:00',
+    },
+  ],
+}
+
+const report = {
+  run_id: 'run_26',
+  report: `# Anomaly Detection Report
+
+- source_run: preprocessed_run_26
+- source_run_token: 26
+- total_transactions: 548108
+- model: isolation_forest
+- contamination: 0.01
+- anomaly_count: 5481
+- anomaly_rate: 0.010000
+
+## Warnings
+Las anomalías detectadas no representan fraude confirmado.
+No se generó is_fraud. No se generó confirmed_fraud. No se usaron reglas como etiquetas.
+`,
+}
+
+const metadata = {
+  run_id: 'run_26',
+  metadata: {
+    source_run: 'preprocessed_run_26',
+    source_run_token: 26,
+    model_name: 'isolation_forest',
+    model_type: 'unsupervised_anomaly_detection',
+    algorithm: 'isolation_forest',
+    contamination: 0.01,
+    total_rows: 548108,
+    anomaly_count: 5481,
+    anomaly_rate: 0.009999854,
+    numeric_features: ['amount', 'amount_log', 'hour_of_day'],
+    categorical_features: ['country_code', 'pos_entry_mode', 'merchant_rubro_proxy'],
+    model_input_columns: ['amount', 'amount_log', 'hour_of_day', 'country_code', 'pos_entry_mode', 'merchant_rubro_proxy'],
+    excluded_columns: ['is_fraud', 'confirmed_fraud', 'target_is_fraud'],
+    model_path: 'data/models/isolation_forest_run_26.pkl',
+    score_file: 'data/processed/anomaly_scores_run_26.csv',
+    feature_file: 'data/processed/unsupervised_feature_set_run_26.csv',
+    report_file: 'data/processed/anomaly_report_run_26.md',
+  },
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  localStorage.setItem('user', JSON.stringify({ id: 1, email: 'user@example.com', token: 'token' }))
+  Object.defineProperty(navigator, 'clipboard', {
+    value: {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    },
+    configurable: true,
+  })
+  api.me.mockResolvedValue({ id: 1, email: 'user@example.com', full_name: 'User' })
+  api.getAnomalyRuns.mockResolvedValue(runs)
+  api.getAnomalyMetrics.mockResolvedValue(metrics)
+  api.getAnomalyScores.mockResolvedValue(scores)
+  api.getTopAnomalies.mockResolvedValue(top)
+  api.getAnomalyReport.mockResolvedValue(report)
+  api.getAnomalyModelMetadata.mockResolvedValue(metadata)
+  api.trainAnomalyModel.mockResolvedValue({ status: 'COMPLETED', anomaly_run_id: 'run_26', source_run: 'preprocessed_run_26' })
+})
+
+afterEach(() => {
+  cleanup()
+})
+
+describe('Models page', () => {
+  it('loads anomaly runs, metrics, paginated scores, report and metadata', async () => {
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+    await waitFor(() => expect(api.getAnomalyMetrics).toHaveBeenCalledWith('run_26'))
+    await waitFor(() => expect(api.getAnomalyScores).toHaveBeenCalledWith('run_26', expect.objectContaining({ page: 1, page_size: 50, anomaly_flag: 1 })))
+    await waitFor(() => expect(api.getTopAnomalies).toHaveBeenCalledWith('run_26', 20))
+    await waitFor(() => expect(api.getAnomalyReport).toHaveBeenCalledWith('run_26'))
+    await waitFor(() => expect(api.getAnomalyModelMetadata).toHaveBeenCalledWith('run_26'))
+
+    expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getByText('Las anomalías detectadas por el modelo no supervisado no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
+    expect(screen.getByText('Total de anomalías')).toBeTruthy()
+    expect(screen.getAllByText((_, element) => (element?.textContent || '').replace(/\D/g, '') === '5481').length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('Las anomalías detectadas no representan fraude confirmado.')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('source_run: preprocessed_run_26')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('source_run_token: 26')).length).toBeGreaterThan(0)
+    expect(screen.getByText('model_name')).toBeTruthy()
+    expect(screen.getAllByText('isolation_forest').length).toBeGreaterThan(0)
+  })
+
+  it('applies filters, opens detail, copies report and trains a model without replacing previous results', async () => {
+    let resolveTrain
+    api.trainAnomalyModel.mockImplementation(() => new Promise((resolve) => { resolveTrain = resolve }))
+
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText('País'), { target: { value: 'BO' } })
+    fireEvent.change(screen.getByLabelText('MCC / Rubro'), { target: { value: '6011' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Aplicar filtros' })[0])
+
+    await waitFor(() => {
+      const lastCall = api.getAnomalyScores.mock.calls.at(-1)
+      expect(lastCall[0]).toBe('run_26')
+      expect(lastCall[1]).toEqual(expect.objectContaining({ page: 1, page_size: 50, anomaly_flag: 1, country_code: 'BO', merchant_rubro_proxy: '6011' }))
+    })
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ver detalle' })[0])
+    expect(screen.getByText('Detalle de anomalía')).toBeTruthy()
+    expect(screen.getByText('Esta transacción fue marcada como anomalía estadística. No constituye fraude confirmado.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar reporte' }))
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText('source_run'), { target: { value: 'preprocessed_run_26' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar entrenamiento' }))
+
+    expect(screen.getByRole('button', { name: 'Ejecutando entrenamiento...' }).disabled).toBe(true)
+    resolveTrain({ status: 'COMPLETED', anomaly_run_id: 'run_26', source_run: 'preprocessed_run_26' })
+
+    await waitFor(() => expect(api.getAnomalyRuns.mock.calls.length).toBeGreaterThan(1))
+    expect(api.trainAnomalyModel).toHaveBeenCalledWith(expect.objectContaining({
+      source_run: 'preprocessed_run_26',
+      contamination: '0.01',
+      n_estimators: '200',
+      max_categories: '50',
+      sample_size: '',
+    }))
+  })
+})
+
+describe('Models route and sidebar', () => {
+  it('renders /models/unsupervised with the sidebar entry', async () => {
+    render(
+      <MemoryRouter initialEntries={['/models/unsupervised']}>
+        <App />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0))
+  })
+})

@@ -5,7 +5,7 @@ const sections = [
   { title: 'Dashboard', items: [{to:'/', label:'Panel'}] },
   { title: 'Fase A: Data Pipeline', items: [{to:'/import', label:'Importación de Datos'}, {to:'/preprocessing', label:'Preprocesamiento'}] },
   { title: 'Fase B: Alertas del Sistema', items: [{to:'/rules-alerts', label:'Reglas y Alertas'}] },
-  { title: 'Fase C: Modelos', items: [{to:'/models/training', label:'Entrenamiento'}, {to:'/models/evaluation', label:'Evaluación de Modelos'}, {to:'/models', label:'Modelo Activo'}] },
+  { title: 'Fase C: Modelos', items: [{to:'/models/unsupervised', label:'No Supervisados'}, {to:'/models/supervised', label:'Supervisados'}, {to:'/models/evaluation', label:'Evaluación de Modelos'}] },
   { title: 'Fase D: Monitoreo', items: [{to:'/monitoring/scoring', label:'Scoring por Lotes'}, {to:'/monitoring/cases', label:'Manejo de Casos'}] },
   { title: 'Administración', items: [{to:'/users', label:'Usuarios'}, {to:'/settings', label:'Configuración'}] }
 ]

@@ -209,4 +209,43 @@ export async function getAlertReviews(runId, params = {}){
   return api.get('/api/rules/reviews', { params: queryParams }).then(r=> r.data)
 }
 
+// ============================================================
+// Phase C.2/C.3: Unsupervised Anomaly API Functions
+// ============================================================
+
+export async function getAnomalyRuns(){
+  return api.get('/api/anomaly/runs').then(r => r.data)
+}
+
+export async function getAnomalyMetrics(runId){
+  return api.get('/api/anomaly/metrics', { params: { run_id: runId } }).then(r => r.data)
+}
+
+export async function getAnomalyScores(runId, params = {}){
+  return api.get('/api/anomaly/scores', { params: { run_id: runId, ...params } }).then(r => r.data)
+}
+
+export async function getTopAnomalies(runId, limit = 20){
+  return api.get('/api/anomaly/top', { params: { run_id: runId, limit } }).then(r => r.data)
+}
+
+export async function getAnomalyReport(runId){
+  return api.get('/api/anomaly/report', { params: { run_id: runId } }).then(r => r.data)
+}
+
+export async function getAnomalyModelMetadata(runId){
+  return api.get('/api/anomaly/model-metadata', { params: { run_id: runId } }).then(r => r.data)
+}
+
+export async function trainAnomalyModel(payload = {}){
+  const params = {}
+  if (payload.source_run != null && payload.source_run !== '') params.source_run = payload.source_run
+  if (payload.model != null && payload.model !== '') params.model = payload.model
+  if (payload.contamination != null && payload.contamination !== '') params.contamination = payload.contamination
+  if (payload.sample_size != null && payload.sample_size !== '') params.sample_size = payload.sample_size
+  if (payload.max_categories != null && payload.max_categories !== '') params.max_categories = payload.max_categories
+  if (payload.n_estimators != null && payload.n_estimators !== '') params.n_estimators = payload.n_estimators
+  return api.post('/api/anomaly/train', null, { params }).then(r => r.data)
+}
+
 export default api

@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import ImportData from './pages/ImportData'
 import Preprocessing from './pages/Preprocessing'
 import Models from './pages/Models'
+import ModelSupervised from './pages/ModelSupervised'
 import ModelTraining from './pages/ModelTraining'
 import ModelEvaluation from './pages/ModelEvaluation'
 import BatchScoring from './pages/BatchScoring'
@@ -73,7 +74,9 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/import" element={<ImportData />} />
           <Route path="/preprocessing" element={<Preprocessing />} />
-          <Route path="/models" element={<Models />} />
+          <Route path="/models" element={<Navigate to="/models/unsupervised" replace />} />
+          <Route path="/models/unsupervised" element={<Models />} />
+          <Route path="/models/supervised" element={<ModelSupervised />} />
           <Route path="/models/training" element={<ModelTraining />} />
           <Route path="/models/evaluation" element={<ModelEvaluation />} />
           <Route path="/monitoring/scoring" element={<BatchScoring />} />
