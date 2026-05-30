@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -196,6 +197,141 @@ def _write_large_summary_rule_files(base_dir: Path) -> None:
     (base_dir / "rules_report_run_26.md").write_text("# Rules Report\n\n- sample report\n", encoding="utf-8")
 
 
+def _write_customer_card_lookup_files(base_dir: Path) -> str:
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    pan_value = "4698261234568047"
+    customer_hash = f"cust_{hashlib.sha256(pan_value.encode('utf-8')).hexdigest()[:16]}"
+    lookup = pd.DataFrame(
+        [
+            {
+                "transaction_id": "tx-lookup-1",
+                "customer_hash": customer_hash,
+                "pan_card": pan_value,
+                "masked_card": "469826******8047",
+                "transaction_datetime": "2026-05-28T10:00:00+00:00",
+                "amount": 10.0,
+            },
+            {
+                "transaction_id": "tx-lookup-2",
+                "customer_hash": "cust_no_match",
+                "pan_card": "4111111111111111",
+                "masked_card": "411111******1111",
+                "transaction_datetime": "2026-05-28T10:05:00+00:00",
+                "amount": 20.0,
+            },
+        ]
+    )
+    lookup.to_csv(base_dir / "uploaded_lookup.csv", index=False)
+    return customer_hash
+
+
+def _write_summary_transactions_rule_files(base_dir: Path, customer_hash: str, *, include_alert_rows: bool = True) -> str:
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_alert_id = "26-S-5186b35686f8"
+    summary_rows = [
+        {
+            "summary_alert_id": summary_alert_id,
+            "source_run": "26",
+            "customer_hash": customer_hash,
+            "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+            "rule_name": "Double country card present same day",
+            "risk_level": "HIGH",
+            "max_risk_score": 95.0,
+            "count_transactions": 3,
+            "countries_detected": "BO|AR",
+            "merchant_rubro_proxy": "5944",
+            "window_start": "2026-04-14T00:00:00+00:00",
+            "window_end": "2026-04-14T00:30:00+00:00",
+            "representative_transaction_id": "tx-001",
+            "status": "NEW",
+            "created_at": "2026-04-14T01:00:00+00:00",
+        }
+    ]
+
+    if include_alert_rows:
+        alert_rows = [
+            {
+                "alert_id": "26-000101",
+                "source_run": "26",
+                "transaction_id": "tx-001",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:07:46+00:00",
+                "amount": 123.45,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Uno",
+                "has_pinblock": 0,
+                "risk_score": 85,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+            {
+                "alert_id": "26-000102",
+                "source_run": "26",
+                "transaction_id": "tx-002",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:15:00+00:00",
+                "amount": 88.0,
+                "country_code": "AR",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Dos",
+                "has_pinblock": 1,
+                "risk_score": 91,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+            {
+                "alert_id": "26-000103",
+                "source_run": "26",
+                "transaction_id": "tx-003",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:30:00+00:00",
+                "amount": 59.5,
+                "country_code": "BO",
+                "pos_entry_mode": "5",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": None,
+                "has_pinblock": 0,
+                "risk_score": 95,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+            {
+                "alert_id": "26-000104",
+                "source_run": "26",
+                "transaction_id": "tx-999",
+                "customer_hash": "cust_other",
+                "transaction_datetime": "2026-04-15T00:30:00+00:00",
+                "amount": 11.0,
+                "country_code": "US",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "6011",
+                "merchant_name": "Other",
+                "has_pinblock": 0,
+                "risk_score": 10,
+                "rule_code": "RULE_VELOCITY_CARD_DAY",
+                "rule_name": "Velocity card day",
+                "status": "NEW",
+            },
+        ]
+        pd.DataFrame(alert_rows).to_csv(base_dir / "alerts_run_26.csv", index=False)
+    else:
+        pd.DataFrame(columns=["alert_id", "source_run", "transaction_id", "customer_hash", "transaction_datetime", "amount", "country_code", "pos_entry_mode", "merchant_rubro_proxy", "merchant_name", "has_pinblock", "risk_score", "rule_code", "rule_name", "status"]).to_csv(base_dir / "alerts_run_26.csv", index=False)
+
+    pd.DataFrame(summary_rows).to_csv(base_dir / "alerts_summary_run_26.csv", index=False)
+    return summary_alert_id
+
+
 def test_rule_routes_endpoints(monkeypatch, test_client, tmp_path):
     processed_dir = tmp_path / "processed"
     _write_sample_rule_files(processed_dir)
@@ -297,6 +433,166 @@ def test_rule_routes_endpoints(monkeypatch, test_client, tmp_path):
     limited_page_size = test_client.get("/api/rules/alerts", params={"run_id": "preprocessed_run_26", "page_size": 999})
     assert limited_page_size.status_code == 200
     assert limited_page_size.json()["page_size"] == 200
+
+
+def test_customer_card_lookup_returns_masked_card(monkeypatch, test_client, tmp_path):
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get("/api/rules/customer-card-lookup", params={"customer_hash": customer_hash})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["customer_hash"] == customer_hash
+    assert payload["available"] is True
+    assert payload["masked_card"] == "469826******8047"
+    assert payload["last4"] == "8047"
+    assert "4698261234568047" not in response.text
+
+
+def test_customer_card_lookup_returns_unavailable_for_missing_mapping(monkeypatch, test_client, tmp_path):
+    uploads_dir = tmp_path / "uploads"
+    _write_customer_card_lookup_files(uploads_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get("/api/rules/customer-card-lookup", params={"customer_hash": "cust_missing"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["customer_hash"] == "cust_missing"
+    assert payload["available"] is False
+    assert payload["masked_card"] is None
+    assert payload["last4"] is None
+
+
+def test_summary_transactions_returns_grouped_transactions(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    summary_alert_id = _write_summary_transactions_rule_files(processed_dir, customer_hash)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "preprocessed_run_26"
+    assert payload["alert_id"] == summary_alert_id
+    assert payload["total_transactions"] == 3
+    assert [item["transaction_id"] for item in payload["items"]] == ["tx-001", "tx-002", "tx-003"]
+    assert payload["items"][0]["transaction_datetime"] == "2026-04-14T00:07:46+00:00"
+    assert payload["items"][0]["masked_card"] == "469826******8047"
+    assert payload["items"][1]["masked_card"] == "469826******8047"
+    assert payload["items"][0]["merchant_name"] == "Mercado Uno"
+    assert payload["warning"] is None
+    assert "4698261234568047" not in response.text
+    assert "pan_card" not in response.text
+
+
+def test_summary_transactions_warns_when_double_country_resolves_to_one_country(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_alert_id = "26-S-WARN-0001"
+    pd.DataFrame(
+        [
+            {
+                "summary_alert_id": summary_alert_id,
+                "source_run": "26",
+                "customer_hash": customer_hash,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "risk_level": "HIGH",
+                "max_risk_score": 95.0,
+                "count_transactions": 2,
+                "countries_detected": "BO",
+                "merchant_rubro_proxy": "5944",
+                "window_start": "2026-04-14T00:00:00+00:00",
+                "window_end": "2026-04-14T00:30:00+00:00",
+                "representative_transaction_id": "tx-001",
+                "status": "NEW",
+                "created_at": "2026-04-14T01:00:00+00:00",
+            }
+        ]
+    ).to_csv(processed_dir / "alerts_summary_run_26.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000001",
+                "source_run": "26",
+                "transaction_id": "tx-001",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:07:46+00:00",
+                "amount": 123.45,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Uno",
+                "has_pinblock": 0,
+                "risk_score": 85,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+            },
+            {
+                "alert_id": "26-000002",
+                "source_run": "26",
+                "transaction_id": "tx-002",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:15:00+00:00",
+                "amount": 88.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Dos",
+                "has_pinblock": 1,
+                "risk_score": 91,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+            },
+        ]
+    ).to_csv(processed_dir / "alerts_run_26.csv", index=False)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["warning"] is not None
+    assert "se esperaban al menos 2" in payload["warning"]
+
+
+def test_summary_transactions_respects_run_id_and_returns_empty_when_no_detail(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    summary_alert_id = _write_summary_transactions_rule_files(processed_dir, customer_hash, include_alert_rows=False)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    empty_response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+    assert empty_response.status_code == 200
+    assert empty_response.json()["total_transactions"] == 0
+    assert empty_response.json()["items"] == []
+
+    missing_run = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_999", "alert_id": summary_alert_id},
+    )
+    assert missing_run.status_code == 404
 
 
 def test_rule_summary_pagination_and_review_filters(monkeypatch, test_client, db_session, tmp_path):

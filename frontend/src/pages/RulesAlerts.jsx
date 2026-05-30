@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Table from '../components/Table'
 import KPICard from '../components/KPICard'
+import { formatDateTime } from '../utils/dateTime'
 import {
   getPreprocessedRuns,
   analyzeRules,
@@ -10,6 +11,8 @@ import {
   getRulesMetrics,
   getRulesAlerts,
   getRuleAlertDetail,
+  getCustomerCardLookup,
+  getRuleSummaryTransactions,
   updateAlertReviewStatus,
   updateSummaryAlertReviewStatus,
   getAlertReviewHistory,
@@ -161,6 +164,20 @@ export default function RulesAlerts() {
   const [selectedAlert, setSelectedAlert] = useState(null)
   const [detailAlerts, setDetailAlerts] = useState([])
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [showSummaryTransactions, setShowSummaryTransactions] = useState(false)
+  const [loadingSummaryTransactions, setLoadingSummaryTransactions] = useState(false)
+  const [summaryTransactions, setSummaryTransactions] = useState([])
+  const [summaryTransactionsLoaded, setSummaryTransactionsLoaded] = useState(false)
+  const [summaryTransactionsError, setSummaryTransactionsError] = useState('')
+  const [summaryTransactionsWarning, setSummaryTransactionsWarning] = useState('')
+  const [cardLookupState, setCardLookupState] = useState({
+    loading: false,
+    loaded: false,
+    available: false,
+    masked_card: null,
+    last4: null,
+    error: ''
+  })
 
   // State for report
   const [showReportModal, setShowReportModal] = useState(false)
@@ -350,18 +367,34 @@ export default function RulesAlerts() {
 
   const handleViewDetail = async (summaryAlert) => {
     setSelectedAlert(summaryAlert)
+    setCardLookupState({
+      loading: false,
+      loaded: false,
+      available: false,
+      masked_card: null,
+      last4: null,
+      error: ''
+    })
+    setShowSummaryTransactions(false)
+    setLoadingSummaryTransactions(false)
+    setSummaryTransactions([])
+    setSummaryTransactionsLoaded(false)
+    setSummaryTransactionsError('')
+    setSummaryTransactionsWarning('')
     setShowDetailModal(true)
     setLoadingDetail(true)
     try {
       const runId = getRunId(selectedRun)
+      const representativeTransactionId = summaryAlert.representative_transaction_id
       const alertsData = await getRulesAlerts(runId, {
         page: 1,
         page_size: 50,
         customer_hash: summaryAlert.customer_hash,
-        rule_code: summaryAlert.rule_code
+        rule_code: summaryAlert.rule_code,
+        ...(representativeTransactionId ? { transaction_id: representativeTransactionId } : {})
       })
       const alertCandidates = getResponseItems(alertsData)
-      const alertId = summaryAlert.alert_id ?? summaryAlert.representative_alert_id ?? alertCandidates[0]?.alert_id ?? alertCandidates[0]?.id
+      const alertId = alertCandidates[0]?.alert_id ?? alertCandidates[0]?.id ?? summaryAlert.alert_id ?? summaryAlert.representative_alert_id
       let detailAlert = alertCandidates[0] || summaryAlert
       if (alertId) {
         try {
@@ -375,6 +408,150 @@ export default function RulesAlerts() {
       console.error('Error loading detail alerts:', e)
     } finally {
       setLoadingDetail(false)
+    }
+  }
+
+  const loadSummaryTransactions = async () => {
+    if (!selectedAlert || !selectedRun) {
+      return
+    }
+
+    const runId = getRunId(selectedRun)
+    const alertId = selectedAlert.summary_alert_id || selectedAlert.alert_id
+    if (!alertId) {
+      setSummaryTransactions([])
+      setSummaryTransactionsLoaded(true)
+      setSummaryTransactionsError('No hay transacciones disponibles para esta alerta.')
+      setShowSummaryTransactions(true)
+      return
+    }
+
+    setShowSummaryTransactions(true)
+    setLoadingSummaryTransactions(true)
+    setSummaryTransactionsError('')
+    try {
+      const response = await getRuleSummaryTransactions(runId, alertId)
+      const items = getResponseItems(response)
+      setSummaryTransactions(items)
+      setSummaryTransactionsLoaded(true)
+      setSummaryTransactionsWarning(response?.warning || '')
+      setShowSummaryTransactions(true)
+    } catch (e) {
+      const statusCode = e?.response?.status || null
+      const message = statusCode === 401 || statusCode === 403
+        ? 'No autorizado para ver las transacciones detectadas.'
+        : statusCode === 404
+          ? 'No se encontraron transacciones para esta alerta agrupada.'
+          : (e?.response?.data?.detail || e?.message || 'No se pudieron cargar las transacciones detectadas.')
+      setSummaryTransactions([])
+      setSummaryTransactionsLoaded(true)
+      setSummaryTransactionsError(message)
+      setSummaryTransactionsWarning('')
+      setShowSummaryTransactions(true)
+    } finally {
+      setLoadingSummaryTransactions(false)
+    }
+  }
+
+  const handleToggleSummaryTransactions = async () => {
+    if (!selectedAlert) return
+
+    if (showSummaryTransactions) {
+      setShowSummaryTransactions(false)
+      return
+    }
+
+    if (summaryTransactionsLoaded && !summaryTransactionsError) {
+      setShowSummaryTransactions(true)
+      return
+    }
+
+    await loadSummaryTransactions()
+  }
+
+  const groupedTransactionOverview = (() => {
+    if (!summaryTransactions.length) {
+      return null
+    }
+
+    const sortableItems = [...summaryTransactions].sort((first, second) => {
+      const firstDate = new Date(first.transaction_datetime || 0).getTime()
+      const secondDate = new Date(second.transaction_datetime || 0).getTime()
+      if (firstDate !== secondDate) {
+        return firstDate - secondDate
+      }
+      return String(first.transaction_id || '').localeCompare(String(second.transaction_id || ''))
+    })
+
+    const firstTransaction = sortableItems[0]
+    const lastTransaction = sortableItems[sortableItems.length - 1]
+    const countries = Array.from(new Set(sortableItems.map((item) => item.country_code).filter(Boolean)))
+    const startDate = firstTransaction?.transaction_datetime ? new Date(firstTransaction.transaction_datetime) : null
+    const endDate = lastTransaction?.transaction_datetime ? new Date(lastTransaction.transaction_datetime) : null
+    const durationMs = startDate && endDate && !Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())
+      ? Math.max(endDate.getTime() - startDate.getTime(), 0)
+      : null
+    const durationText = durationMs !== null
+      ? `${Math.floor(durationMs / 60000)} min`
+      : 'N/A'
+
+    return {
+      totalTransactions: sortableItems.length,
+      firstTransaction: firstTransaction?.transaction_datetime ? formatDateTime(firstTransaction.transaction_datetime) : 'N/A',
+      lastTransaction: lastTransaction?.transaction_datetime ? formatDateTime(lastTransaction.transaction_datetime) : 'N/A',
+      countries: countries.length > 0 ? countries.join(' | ') : 'N/A',
+      durationText
+    }
+  })()
+  const detectedTransactionsCount = Number(selectedAlert?.count_transactions || 0)
+
+  const handleCustomerCardLookup = async () => {
+    if (!selectedAlert?.customer_hash) {
+      setCardLookupState({
+        loading: false,
+        loaded: true,
+        available: false,
+        masked_card: null,
+        last4: null,
+        error: 'No disponible'
+      })
+      return
+    }
+
+    setCardLookupState((prev) => ({ ...prev, loading: true, error: '' }))
+    try {
+      const response = await getCustomerCardLookup(selectedAlert.customer_hash)
+      if (response?.available && response?.masked_card) {
+        setCardLookupState({
+          loading: false,
+          loaded: true,
+          available: true,
+          masked_card: response.masked_card,
+          last4: response.last4 || null,
+          error: ''
+        })
+        return
+      }
+
+      setCardLookupState({
+        loading: false,
+        loaded: true,
+        available: false,
+        masked_card: null,
+        last4: null,
+        error: 'No disponible'
+      })
+    } catch (e) {
+      const statusCode = e?.response?.status || null
+      const message = statusCode === 401 || statusCode === 403 ? 'No autorizado' : 'No disponible'
+      setCardLookupState({
+        loading: false,
+        loaded: true,
+        available: false,
+        masked_card: null,
+        last4: null,
+        error: message
+      })
     }
   }
 
@@ -554,7 +731,7 @@ export default function RulesAlerts() {
                     <td>{run.id}</td>
                     <td>{run.file || 'preprocessed_run_' + run.id}</td>
                     <td>{run.file_size ? (run.file_size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}</td>
-                    <td>{run.created_at || run.date || 'N/A'}</td>
+                    <td>{formatDateTime(run.created_at || run.date || 'N/A') || 'N/A'}</td>
                     <td>{run.has_alerts ? '✓' : '✗'}</td>
                     <td>{run.has_summary ? '✓' : '✗'}</td>
                     <td>{run.has_report ? '✓' : '✗'}</td>
@@ -912,6 +1089,48 @@ export default function RulesAlerts() {
                     <td>{selectedAlert.customer_hash || 'N/A'}</td>
                   </tr>
                   <tr>
+                    <td style={{ fontWeight: 'bold' }}>Tarjeta asociada:</td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {!cardLookupState.loaded && !cardLookupState.loading && (
+                          <button
+                            className="button"
+                            onClick={handleCustomerCardLookup}
+                            style={{ width: 'fit-content', padding: '6px 10px', fontSize: 12 }}
+                          >
+                            Ver tarjeta asociada
+                          </button>
+                        )}
+                        {cardLookupState.loading && <span>Cargando tarjeta asociada...</span>}
+                        {!cardLookupState.loading && cardLookupState.loaded && cardLookupState.available && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 'bold' }}>{cardLookupState.masked_card || 'No disponible'}</span>
+                            <button
+                              className="button"
+                              onClick={() => setCardLookupState({
+                                loading: false,
+                                loaded: false,
+                                available: false,
+                                masked_card: null,
+                                last4: null,
+                                error: ''
+                              })}
+                              style={{ width: 'fit-content', padding: '6px 10px', fontSize: 12, backgroundColor: '#6b7280' }}
+                            >
+                              Ocultar
+                            </button>
+                          </div>
+                        )}
+                        {!cardLookupState.loading && cardLookupState.loaded && !cardLookupState.available && (
+                          <span>{cardLookupState.error || 'No disponible'}</span>
+                        )}
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          Se muestra solo una referencia enmascarada para apoyo de revisión. No corresponde al PAN completo.
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
                     <td style={{ fontWeight: 'bold' }}>Regla:</td>
                     <td>{selectedAlert.rule_code || 'N/A'}</td>
                   </tr>
@@ -929,7 +1148,21 @@ export default function RulesAlerts() {
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Transacciones Detectadas:</td>
-                    <td>{selectedAlert.count_transactions || '0'}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <span>{selectedAlert.count_transactions || '0'}</span>
+                        {detectedTransactionsCount > 0 && (
+                          <button
+                            className="button"
+                            onClick={handleToggleSummaryTransactions}
+                            disabled={loadingSummaryTransactions}
+                            style={{ width: 'fit-content', padding: '6px 10px', fontSize: 12, backgroundColor: '#2563eb' }}
+                          >
+                            {showSummaryTransactions ? 'Ocultar transacciones' : (detectedTransactionsCount === 1 ? 'Ver transacción detectada' : 'Ver transacciones detectadas')}
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Países Detectados:</td>
@@ -937,11 +1170,15 @@ export default function RulesAlerts() {
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Ventana Inicio:</td>
-                    <td>{selectedAlert.window_start || 'N/A'}</td>
+                    <td>{formatDateTime(selectedAlert.window_start) || 'N/A'}</td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Ventana Fin:</td>
-                    <td>{selectedAlert.window_end || 'N/A'}</td>
+                    <td>{formatDateTime(selectedAlert.window_end) || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ fontWeight: 'bold' }}>Creado:</td>
+                    <td>{formatDateTime(selectedAlert.created_at) || 'N/A'}</td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>MCC/Rubro:</td>
@@ -1043,7 +1280,7 @@ export default function RulesAlerts() {
                       <tbody>
                         {reviewHistory.map((entry, idx) => (
                           <tr key={idx}>
-                            <td>{new Date(entry.reviewed_at).toLocaleString()}</td>
+                            <td>{formatDateTime(entry.reviewed_at) || 'N/A'}</td>
                             <td>{entry.previous_status || 'N/A'}</td>
                             <td style={{ fontWeight: 'bold', color: entry.new_status === 'CONFIRMED_FRAUD' ? '#ff7b89' : '#6aa9ff' }}>
                               {entry.new_status}
@@ -1052,6 +1289,89 @@ export default function RulesAlerts() {
                               {entry.analyst_notes || '-'}
                             </td>
                             <td>{entry.reviewed_by_id || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showSummaryTransactions && (
+              <div className="detail-section" style={{ marginBottom: 16, padding: 12, borderRadius: 6 }}>
+                <h4>{detectedTransactionsCount === 1 ? 'Transacción Detectada' : 'Transacciones Detectadas'}</h4>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                  Estas son las transacciones que componen la alerta agrupada y sirven como apoyo para la revisión humana.
+                  {selectedAlert?.rule_code && selectedAlert.rule_code.startsWith('RULE_DOUBLE_COUNTRY') && ' Revise el orden temporal, los países detectados y la plausibilidad del desplazamiento.'}
+                </p>
+                {groupedTransactionOverview && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 12 }}>
+                    <div className="detail-section" style={{ padding: 10, marginBottom: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total de transacciones</div>
+                      <div style={{ fontWeight: 'bold' }}>{groupedTransactionOverview.totalTransactions}</div>
+                    </div>
+                    <div className="detail-section" style={{ padding: 10, marginBottom: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Primera transacción</div>
+                      <div style={{ fontWeight: 'bold' }}>{groupedTransactionOverview.firstTransaction}</div>
+                    </div>
+                    <div className="detail-section" style={{ padding: 10, marginBottom: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Última transacción</div>
+                      <div style={{ fontWeight: 'bold' }}>{groupedTransactionOverview.lastTransaction}</div>
+                    </div>
+                    <div className="detail-section" style={{ padding: 10, marginBottom: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Países involucrados</div>
+                      <div style={{ fontWeight: 'bold' }}>{groupedTransactionOverview.countries}</div>
+                    </div>
+                    <div className="detail-section" style={{ padding: 10, marginBottom: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Duración de la ventana</div>
+                      <div style={{ fontWeight: 'bold' }}>{groupedTransactionOverview.durationText}</div>
+                    </div>
+                  </div>
+                )}
+                {loadingSummaryTransactions && <div>Cargando transacciones detectadas...</div>}
+                {!loadingSummaryTransactions && summaryTransactionsWarning && (
+                  <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 8, backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b' }}>
+                    {summaryTransactionsWarning}
+                  </div>
+                )}
+                {!loadingSummaryTransactions && summaryTransactionsError && <div>{summaryTransactionsError}</div>}
+                {!loadingSummaryTransactions && !summaryTransactionsError && summaryTransactions.length === 0 && summaryTransactionsLoaded && (
+                  <div>No hay transacciones detectadas para esta alerta agrupada.</div>
+                )}
+                {!loadingSummaryTransactions && !summaryTransactionsError && summaryTransactions.length > 0 && (
+                  <div className="table-scroll">
+                    <table className="table detail-table" style={{ fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>N°</th>
+                          <th>transaction_datetime</th>
+                          <th>Monto</th>
+                          <th>País</th>
+                          <th>POS Entry</th>
+                          <th>MCC/Rubro</th>
+                          <th>masked_card</th>
+                          <th>transaction_id</th>
+                          <th>risk_score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...summaryTransactions].sort((first, second) => {
+                          const firstDate = new Date(first.transaction_datetime || 0).getTime()
+                          const secondDate = new Date(second.transaction_datetime || 0).getTime()
+                          if (firstDate !== secondDate) return firstDate - secondDate
+                          return String(first.transaction_id || '').localeCompare(String(second.transaction_id || ''))
+                        }).map((transaction, idx) => (
+                          <tr key={`${transaction.transaction_id || idx}`}>
+                            <td>{idx + 1}</td>
+                            <td>{formatDateTime(transaction.transaction_datetime) || 'N/A'}</td>
+                            <td>{transaction.amount ?? 'N/A'}</td>
+                            <td>{transaction.country_code || 'N/A'}</td>
+                            <td>{transaction.pos_entry_mode || 'N/A'}</td>
+                            <td>{transaction.merchant_rubro_proxy || 'N/A'}</td>
+                            <td>{transaction.masked_card || 'No disponible'}</td>
+                            <td>{transaction.transaction_id || 'N/A'}</td>
+                            <td>{transaction.risk_score ?? 'N/A'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1087,7 +1407,7 @@ export default function RulesAlerts() {
                         <tr key={idx}>
                           <td>{alert.alert_id || idx}</td>
                           <td>{alert.transaction_id || 'N/A'}</td>
-                          <td>{alert.transaction_datetime || 'N/A'}</td>
+                          <td>{formatDateTime(alert.transaction_datetime) || 'N/A'}</td>
                           <td>{alert.amount || '0'}</td>
                           <td>{alert.country_code || 'N/A'}</td>
                           <td>{alert.pos_entry_mode || 'N/A'}</td>

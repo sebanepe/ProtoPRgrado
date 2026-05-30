@@ -162,6 +162,14 @@ export async function getRuleAlertDetail(alertId, runId){
   return api.get(`/api/rules/alerts/${alertId}`, { params: { run_id: runId } }).then(r=> r.data)
 }
 
+export async function getCustomerCardLookup(customerHash){
+  return api.get('/api/rules/customer-card-lookup', { params: { customer_hash: customerHash } }).then(r=> r.data)
+}
+
+export async function getRuleSummaryTransactions(runId, alertId){
+  return api.get('/api/rules/summary-transactions', { params: { run_id: runId, alert_id: alertId } }).then(r=>r.data)
+}
+
 export async function getRulesReport(runId){
   return api.get('/api/rules/report', { params: { run_id: runId } }).then(r=> r.data)
 }

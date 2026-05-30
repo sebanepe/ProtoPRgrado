@@ -41,7 +41,11 @@ const summaryPage1 = {
       max_risk_score: 85,
       count_transactions: 2,
       countries_detected: 'BO|AR',
-      status: 'NEW'
+      representative_transaction_id: 'tx-001',
+      status: 'NEW',
+      window_start: '2026-04-12T21:56:11.649000+00:00',
+      window_end: '2026-04-12T22:16:11.649000+00:00',
+      created_at: '2026-04-12T22:20:11.649000+00:00'
     }
   ]
 }
@@ -90,8 +94,100 @@ beforeEach(() => {
     customer_hash: ['cust-1', 'cust-2']
   })
   api.getRulesReport.mockResolvedValue({ report: '# Report' })
-  api.getRulesAlerts.mockResolvedValue({ run_id: 'preprocessed_run_26', page: 1, page_size: 50, total_items: 0, total_pages: 0, items: [] })
-  api.getRuleAlertDetail.mockResolvedValue({ alert_id: '26-000001' })
+  api.getRulesAlerts.mockImplementation((_runId, params = {}) => {
+    if (params.transaction_id === 'tx-001') {
+      return Promise.resolve({
+        run_id: 'preprocessed_run_26',
+        page: 1,
+        page_size: 50,
+        total_items: 1,
+        total_pages: 1,
+        items: [
+          {
+            alert_id: '26-000001',
+            transaction_id: 'tx-001',
+            customer_hash: 'cust-1',
+            transaction_datetime: '2026-04-12T21:56:11.649000+00:00',
+            amount: 10.0,
+            country_code: 'BO',
+            pos_entry_mode: '7',
+            merchant_rubro_proxy: '5944',
+            rule_code: 'RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY',
+            rule_name: 'Double country card present same day',
+            risk_level: 'HIGH',
+            risk_score: 0.95,
+            status: 'NEW'
+          }
+        ]
+      })
+    }
+    return Promise.resolve({ run_id: 'preprocessed_run_26', page: 1, page_size: 50, total_items: 0, total_pages: 0, items: [] })
+  })
+  api.getRuleSummaryTransactions.mockResolvedValue({
+    run_id: 'preprocessed_run_26',
+    alert_id: '26-S-000001',
+    total_transactions: 3,
+    items: [
+      {
+        transaction_id: 'tx-001',
+        transaction_datetime: '2026-04-14T00:07:46.000000+00:00',
+        amount: 123.45,
+        country_code: 'BO',
+        pos_entry_mode: '7',
+        merchant_rubro_proxy: '5944',
+        merchant_name: 'Mercado Uno',
+        has_pinblock: 0,
+        risk_score: 85,
+        customer_hash: 'cust-1',
+        masked_card: '469826******8047'
+      },
+      {
+        transaction_id: 'tx-002',
+        transaction_datetime: '2026-04-14T00:15:00.000000+00:00',
+        amount: 88,
+        country_code: 'AR',
+        pos_entry_mode: '7',
+        merchant_rubro_proxy: '5944',
+        merchant_name: 'Mercado Dos',
+        has_pinblock: 1,
+        risk_score: 91,
+        customer_hash: 'cust-1',
+        masked_card: '469826******8047'
+      },
+      {
+        transaction_id: 'tx-003',
+        transaction_datetime: '2026-04-14T00:30:00.000000+00:00',
+        amount: 59.5,
+        country_code: 'BO',
+        pos_entry_mode: '5',
+        merchant_rubro_proxy: '5944',
+        merchant_name: null,
+        has_pinblock: 0,
+        risk_score: 95,
+        customer_hash: 'cust-1',
+        masked_card: null
+      }
+    ]
+  })
+  api.getRuleAlertDetail.mockResolvedValue({
+    alert_id: '26-000001',
+    transaction_id: 'tx-1',
+    customer_hash: 'cust-1',
+    transaction_datetime: '2026-04-12T21:56:11.649000+00:00',
+    amount: 10.0,
+    country_code: 'BO',
+    pos_entry_mode: '7',
+    merchant_rubro_proxy: '5944',
+    risk_score: 0.95,
+    alert_reason: 'Double country card present same day',
+    created_at: '2026-04-12T22:20:11.649000+00:00'
+  })
+  api.getCustomerCardLookup.mockResolvedValue({
+    customer_hash: 'cust-1',
+    masked_card: null,
+    last4: null,
+    available: false
+  })
   api.getAlertReviewHistory.mockResolvedValue({ history: [] })
   api.getSummaryAlertReviewHistory.mockResolvedValue({ history: [] })
   api.updateAlertReviewStatus.mockResolvedValue({})
@@ -240,6 +336,177 @@ describe('RulesAlerts page', () => {
     await waitFor(() => {
       const matchingCells = screen.getAllByRole('cell', { name: 'RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY' })
       expect(matchingCells.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('formats dates and loads masked card lookup in the detail modal', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+    api.getCustomerCardLookup.mockResolvedValue({
+      customer_hash: 'cust-1',
+      masked_card: '469826******8047',
+      last4: '8047',
+      available: true
+    })
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+
+    await waitFor(() => expect(api.getRulesAlerts).toHaveBeenCalledWith('preprocessed_run_26', expect.objectContaining({ transaction_id: 'tx-001' })))
+    await waitFor(() => expect(screen.getAllByText('2026-04-12 21:56:11').length).toBeGreaterThan(0))
+    expect(screen.getAllByText('2026-04-12 22:16:11').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('2026-04-12 22:20:11').length).toBeGreaterThan(0)
+    expect(screen.getByText('Ver tarjeta asociada')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Ver tarjeta asociada/ }))
+
+    await waitFor(() => {
+      expect(api.getCustomerCardLookup).toHaveBeenCalledWith('cust-1')
+      expect(screen.getByText('469826******8047')).toBeTruthy()
+    })
+
+    expect(screen.queryByText('4698261234568047')).toBeNull()
+    expect(screen.queryByText('is_fraud')).toBeNull()
+    expect(screen.queryByText('confirmed_fraud')).toBeNull()
+  })
+
+  it('shows no disponible when customer card mapping is missing', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+    api.getCustomerCardLookup.mockResolvedValue({
+      customer_hash: 'cust-1',
+      masked_card: null,
+      last4: null,
+      available: false
+    })
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+
+    fireEvent.click(screen.getByRole('button', { name: /Ver tarjeta asociada/ }))
+
+    await waitFor(() => {
+      expect(api.getCustomerCardLookup).toHaveBeenCalledWith('cust-1')
+      expect(screen.getByText('No disponible')).toBeTruthy()
+    })
+  })
+
+  it('loads, renders, and hides grouped transactions from the detail modal', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+
+    expect(screen.getByRole('button', { name: /Ver transacciones detectadas/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Ver transacciones detectadas/ }))
+
+    await waitFor(() => {
+      expect(api.getRuleSummaryTransactions).toHaveBeenCalledWith('preprocessed_run_26', '26-S-000001')
+      expect(screen.getByText(/Estas son las transacciones que componen la alerta agrupada/)).toBeTruthy()
+      expect(screen.getByText('2026-04-14 00:07:46', { selector: 'td' })).toBeTruthy()
+      expect(screen.getAllByText('469826******8047').length).toBeGreaterThanOrEqual(2)
+      expect(screen.queryByText('4698261234568047')).toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Ocultar transacciones/ }))
+    await waitFor(() => {
+      expect(screen.queryByText(/Estas son las transacciones que componen la alerta agrupada/)).toBeNull()
+    })
+  })
+
+  it('shows loading while fetching grouped transactions', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+
+    let resolveTransactions
+    const pendingTransactions = new Promise((resolve) => {
+      resolveTransactions = resolve
+    })
+    api.getRuleSummaryTransactions.mockReturnValue(pendingTransactions)
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /Ver transacciones detectadas/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cargando transacciones detectadas/)).toBeTruthy()
+    })
+
+    resolveTransactions({
+      run_id: 'preprocessed_run_26',
+      alert_id: '26-S-000001',
+      total_transactions: 1,
+      items: [
+        {
+          transaction_id: 'tx-001',
+          transaction_datetime: '2026-04-14T00:07:46.000000+00:00',
+          amount: 123.45,
+          country_code: 'BO',
+          pos_entry_mode: '7',
+          merchant_rubro_proxy: '5944',
+          risk_score: 85,
+          customer_hash: 'cust-1',
+          masked_card: '469826******8047'
+        }
+      ]
+    })
+
+    await waitFor(() => expect(screen.getByText('469826******8047')).toBeTruthy())
+  })
+
+  it('shows an empty message when grouped transactions are missing', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+    api.getRuleSummaryTransactions.mockResolvedValue({
+      run_id: 'preprocessed_run_26',
+      alert_id: '26-S-000001',
+      total_transactions: 0,
+      items: []
+    })
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /Ver transacciones detectadas/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText('No hay transacciones detectadas para esta alerta agrupada.')).toBeTruthy()
+    })
+  })
+
+  it('shows a controlled message when grouped transactions are unauthorized', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+    api.getRuleSummaryTransactions.mockRejectedValue({ response: { status: 403, data: { detail: 'Forbidden' } } })
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /Ver transacciones detectadas/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText('No autorizado para ver las transacciones detectadas.')).toBeTruthy()
     })
   })
 

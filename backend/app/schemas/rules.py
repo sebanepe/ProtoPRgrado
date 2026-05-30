@@ -79,6 +79,35 @@ class RuleMetricsResponse(BaseModel):
     top_customers: List[Dict[str, Any]]
 
 
+class CustomerCardLookupResponse(BaseModel):
+    customer_hash: str
+    masked_card: Optional[str] = None
+    last4: Optional[str] = None
+    available: bool = False
+
+
+class SummaryTransactionItem(BaseModel):
+    transaction_id: Optional[str] = None
+    transaction_datetime: Optional[str] = None
+    amount: Optional[float] = None
+    country_code: Optional[str] = None
+    pos_entry_mode: Optional[str] = None
+    merchant_rubro_proxy: Optional[str] = None
+    merchant_name: Optional[str] = None
+    has_pinblock: Optional[int] = None
+    risk_score: Optional[float] = None
+    customer_hash: Optional[str] = None
+    masked_card: Optional[str] = None
+
+
+class SummaryTransactionsResponse(BaseModel):
+    run_id: str
+    alert_id: str
+    total_transactions: int
+    items: List[SummaryTransactionItem]
+    warning: Optional[str] = None
+
+
 # ============================================================
 # Alert Review Schemas (PHASE B.3)
 # ============================================================

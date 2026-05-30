@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import hashlib
 import os
 import re
 import time
@@ -18,12 +19,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.models.models import RuleAlertReview
+from backend.app.models.models import RuleAlertReview, SystemLog
 from backend.app.schemas.rules import (
     AlertItem,
     AlertSummaryItem,
     AlertStatusUpdateRequest,
     AlertStatusUpdateResponse,
+    CustomerCardLookupResponse,
     AlertReviewHistoryResponse,
     PaginatedAlertSummaryResponse,
     PaginatedAlertsResponse,
@@ -31,9 +33,12 @@ from backend.app.schemas.rules import (
     RuleAnalyzeRequest,
     RuleAnalyzeResponse,
     RuleMetricsResponse,
+    SummaryTransactionItem,
+    SummaryTransactionsResponse,
     RunListItem,
 )
 from backend.app.services import rule_engine_service, rule_alert_review_service
+from backend.app.services.authorization import get_user_from_header, require_permission
 
 
 router = APIRouter(prefix="/api/rules", tags=["rules", "alert_rules", "fraud_rules"])
@@ -42,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 def _processed_dir() -> Path:
     return Path(os.environ.get("PROJECT_PROCESSED_DIR") or rule_engine_service.PROJECT_PROCESSED_DIR)
+
+
+def _uploads_dir() -> Path:
+    return Path(os.environ.get("DATASET_STORAGE") or os.path.join(os.getcwd(), "data", "uploads"))
 
 
 def _to_posix_path(path: Path) -> str:
@@ -59,6 +68,298 @@ def _run_token_from_run_id(run_id: str) -> str:
     if match:
         return match.group(1)
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id must contain a numeric suffix")
+
+
+def _normalize_customer_hash(value: Any) -> Optional[str]:
+    return _normalize_filter_value(value)
+
+
+def _sha_prefix(value: Any, prefix: str) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        text = str(value)
+    except Exception:
+        return None
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}_{digest}"
+
+
+def _mask_card_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw or raw.lower() in {"nan", "none", "null"}:
+        return None
+
+    if any(marker in raw for marker in ("*", "X", "x")):
+        return re.sub(r"[\s-]+", "", raw)
+
+    digits = "".join(character for character in raw if character.isdigit())
+    if not digits:
+        return None
+
+    if len(digits) <= 4:
+        return f"****{digits[-4:]}"
+
+    if len(digits) >= 10:
+        middle = "*" * max(len(digits) - 10, 0)
+        return f"{digits[:6]}{middle}{digits[-4:]}"
+
+    return f"{'*' * max(len(digits) - 4, 4)}{digits[-4:]}"
+
+
+def _last4_from_masked_card(masked_card: Any) -> Optional[str]:
+    if masked_card is None:
+        return None
+    digits = "".join(character for character in str(masked_card) if character.isdigit())
+    if len(digits) >= 4:
+        return digits[-4:]
+    return None
+
+
+def _lookup_customer_card(customer_hash: str) -> dict[str, Any]:
+    normalized_hash = _normalize_customer_hash(customer_hash)
+    if not normalized_hash:
+        return {"customer_hash": customer_hash, "masked_card": None, "last4": None, "available": False}
+
+    uploads_dir = _uploads_dir()
+    if not uploads_dir.exists():
+        return {"customer_hash": normalized_hash, "masked_card": None, "last4": None, "available": False}
+
+    csv_paths = sorted(uploads_dir.glob("*.csv"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for csv_path in csv_paths:
+        try:
+            for chunk in pd.read_csv(csv_path, dtype=str, chunksize=5000, low_memory=False):
+                if chunk.empty:
+                    continue
+
+                normalized_columns = {str(column).strip().lower(): column for column in chunk.columns}
+                customer_col = normalized_columns.get("customer_hash")
+                masked_col = normalized_columns.get("masked_card") or normalized_columns.get("tarjeta") or normalized_columns.get("masked")
+                pan_col = normalized_columns.get("pan_card") or normalized_columns.get("pan_tarjeta") or normalized_columns.get("card_pan") or normalized_columns.get("pan")
+
+                if not customer_col and not masked_col and not pan_col:
+                    continue
+
+                customer_series = chunk[customer_col].astype(str).str.strip() if customer_col else None
+                masked_series = chunk[masked_col] if masked_col else None
+                pan_series = chunk[pan_col] if pan_col else None
+
+                if customer_series is not None:
+                    customer_mask = customer_series.eq(normalized_hash)
+                else:
+                    customer_mask = pd.Series([False] * len(chunk), index=chunk.index)
+
+                derived_mask = pd.Series([False] * len(chunk), index=chunk.index)
+                if masked_series is not None:
+                    derived_mask = derived_mask | masked_series.apply(lambda value: _sha_prefix(value, "cust") == normalized_hash)
+                if pan_series is not None:
+                    derived_mask = derived_mask | pan_series.apply(lambda value: _sha_prefix(value, "cust") == normalized_hash)
+
+                match_mask = customer_mask | derived_mask
+                if not match_mask.any():
+                    continue
+
+                match_row = chunk.loc[match_mask].head(1).iloc[0].to_dict()
+                masked_value = None
+                if masked_col and match_row.get(masked_col) is not None:
+                    masked_value = _mask_card_value(match_row.get(masked_col))
+                if not masked_value and pan_col and match_row.get(pan_col) is not None:
+                    masked_value = _mask_card_value(match_row.get(pan_col))
+
+                return {
+                    "customer_hash": normalized_hash,
+                    "masked_card": masked_value,
+                    "last4": _last4_from_masked_card(masked_value),
+                    "available": bool(masked_value),
+                }
+        except Exception:
+            continue
+
+    return {"customer_hash": normalized_hash, "masked_card": None, "last4": None, "available": False}
+
+
+def _summary_rule_category(rule_code: Any) -> str:
+    normalized_rule = _normalize_filter_value(rule_code, uppercase=True)
+    if not normalized_rule:
+        return "fallback"
+    if normalized_rule.startswith("RULE_DOUBLE_COUNTRY"):
+        return "double_country"
+    if normalized_rule in rule_engine_service.HOUR_GROUP_RULES:
+        return "hour"
+    if normalized_rule in rule_engine_service.DAY_GROUP_RULES:
+        return "day"
+    if normalized_rule in rule_engine_service.MCC_GROUP_RULES:
+        return "mcc"
+    return "fallback"
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[pd.Timestamp]:
+    parsed = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(parsed):
+        return None
+    return parsed
+
+
+def _format_transaction_datetime(value: Any) -> Optional[str]:
+    parsed = _parse_utc_timestamp(value)
+    if parsed is None:
+        return _normalize_filter_value(value)
+    return parsed.isoformat()
+
+
+def _country_codes_from_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    text = str(value).upper()
+    match = re.search(r"COUNTRIES\s*:\s*([^\.\n;]+)", text)
+    if not match:
+        return []
+
+    countries = []
+    for token in re.split(r"[^A-Z0-9]+", match.group(1).upper()):
+        token = token.strip()
+        if len(token) == 2 and token.isalpha():
+            countries.append(token)
+    return list(dict.fromkeys(countries))
+
+
+def _find_summary_alert_row(summary_df: pd.DataFrame, alert_id: str) -> Optional[dict[str, Any]]:
+    if summary_df.empty or "summary_alert_id" not in summary_df.columns:
+        return None
+
+    normalized_alert_id = _normalize_filter_value(alert_id)
+    if not normalized_alert_id:
+        return None
+
+    match = summary_df.loc[summary_df["summary_alert_id"].astype(str) == normalized_alert_id]
+    if match.empty:
+        return None
+    return match.head(1).iloc[0].to_dict()
+
+
+def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[str, list[dict[str, Any]], Optional[str]]:
+    alerts_path = _alerts_file(run_id)
+    summary_path = _summary_file(run_id)
+
+    if not alerts_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Alerts not found for run_id={run_id}")
+
+    alerts_df = _load_csv(alerts_path)
+    summary_df = _load_csv(summary_path) if summary_path.exists() else pd.DataFrame()
+
+    summary_row = _find_summary_alert_row(summary_df, alert_id)
+    resolved_alert_id = _normalize_filter_value(alert_id)
+
+    if summary_row is None:
+        if "alert_id" not in alerts_df.columns:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        alert_match = alerts_df.loc[alerts_df["alert_id"].astype(str) == str(alert_id)]
+        if alert_match.empty:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+        sort_columns = [column for column in ["transaction_datetime", "transaction_id"] if column in alert_match.columns]
+        if sort_columns:
+            alert_match = alert_match.sort_values(sort_columns, na_position="last")
+        row = alert_match.head(1).iloc[0].to_dict()
+        resolved_alert_id = _normalize_filter_value(row.get("alert_id")) or resolved_alert_id or str(alert_id)
+        transaction_rows = [row]
+    else:
+        resolved_alert_id = _normalize_filter_value(summary_row.get("summary_alert_id")) or resolved_alert_id or str(alert_id)
+        transaction_rows = []
+        if alerts_df.empty:
+            return resolved_alert_id, transaction_rows, None
+
+        filtered = alerts_df.copy()
+        source_run = _normalize_filter_value(summary_row.get("source_run")) or _run_token_from_run_id(run_id)
+        allowed_runs = {source_run, _run_token_from_run_id(run_id), str(run_id).strip()}
+        allowed_runs = {value for value in allowed_runs if value}
+
+        if "source_run" in filtered.columns and allowed_runs:
+            filtered = filtered.loc[filtered["source_run"].astype(str).str.strip().isin(allowed_runs)]
+
+        customer_hash = _normalize_filter_value(summary_row.get("customer_hash"))
+        if customer_hash and "customer_hash" in filtered.columns:
+            filtered = filtered.loc[filtered["customer_hash"].astype(str).str.strip() == customer_hash]
+
+        rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True)
+        if rule_code and "rule_code" in filtered.columns:
+            filtered = filtered.loc[filtered["rule_code"].astype(str).str.strip().str.upper() == rule_code]
+
+        summary_alert_id = _normalize_filter_value(summary_row.get("summary_alert_id"))
+        if summary_alert_id and "summary_alert_id" in filtered.columns:
+            exact_summary = filtered.loc[filtered["summary_alert_id"].astype(str).str.strip() == summary_alert_id]
+            if not exact_summary.empty:
+                filtered = exact_summary
+
+        category = _summary_rule_category(rule_code)
+        if category == "mcc":
+            merchant_rubro_proxy = _normalize_filter_value(summary_row.get("merchant_rubro_proxy"), uppercase=True) or _normalize_filter_value(summary_row.get("top_merchant_rubro_proxy"), uppercase=True)
+            if merchant_rubro_proxy and merchant_rubro_proxy not in {"UNKNOWN", "NONE", "NULL", "NAN"} and "merchant_rubro_proxy" in filtered.columns:
+                filtered = filtered.loc[filtered["merchant_rubro_proxy"].astype(str).str.strip().str.upper() == merchant_rubro_proxy]
+
+        start = _parse_utc_timestamp(summary_row.get("window_start"))
+        end = _parse_utc_timestamp(summary_row.get("window_end"))
+        if start is not None and end is not None and "transaction_datetime" in filtered.columns:
+            transaction_datetimes = pd.to_datetime(filtered["transaction_datetime"], errors="coerce", utc=True)
+            filtered = filtered.loc[transaction_datetimes.between(start, end, inclusive="both")]
+
+        if filtered.empty and summary_row.get("representative_transaction_id") and "transaction_id" in alerts_df.columns:
+            representative_id = str(summary_row.get("representative_transaction_id")).strip()
+            filtered = alerts_df.loc[alerts_df["transaction_id"].astype(str).str.strip() == representative_id]
+
+        if not filtered.empty:
+            sort_columns = [column for column in ["transaction_datetime", "transaction_id"] if column in filtered.columns]
+            if sort_columns:
+                filtered = filtered.sort_values(sort_columns, na_position="last")
+
+        transaction_rows = filtered.to_dict(orient="records")
+
+    customer_lookup_cache: dict[str, dict[str, Any]] = {}
+    items: list[dict[str, Any]] = []
+    for row in transaction_rows:
+        customer_hash = _normalize_filter_value(row.get("customer_hash"))
+        lookup = None
+        if customer_hash:
+            lookup = customer_lookup_cache.get(customer_hash)
+            if lookup is None:
+                lookup = _lookup_customer_card(customer_hash)
+                customer_lookup_cache[customer_hash] = lookup
+
+        items.append(
+            {
+                "transaction_id": _normalize_filter_value(row.get("transaction_id")),
+                "transaction_datetime": _format_transaction_datetime(row.get("transaction_datetime")),
+                "amount": _sanitize_for_json(row.get("amount")),
+                "country_code": _normalize_filter_value(row.get("country_code"), uppercase=True),
+                "pos_entry_mode": _normalize_filter_value(row.get("pos_entry_mode")),
+                "merchant_rubro_proxy": _normalize_filter_value(row.get("merchant_rubro_proxy"), uppercase=True),
+                "merchant_name": _normalize_filter_value(row.get("merchant_name")),
+                "has_pinblock": _sanitize_for_json(row.get("has_pinblock")),
+                "risk_score": _sanitize_for_json(row.get("risk_score")),
+                "customer_hash": customer_hash,
+                "masked_card": lookup.get("masked_card") if lookup and lookup.get("available") else None,
+            }
+        )
+
+    resolved_rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True) if summary_row is not None else _normalize_filter_value(row.get("rule_code"), uppercase=True)
+    distinct_countries = []
+    for country in [_normalize_filter_value(item.get("country_code"), uppercase=True) for item in items]:
+        if country and country not in distinct_countries:
+            distinct_countries.append(country)
+
+    warning = None
+    if resolved_rule_code and resolved_rule_code.startswith("RULE_DOUBLE_COUNTRY") and len(distinct_countries) < 2:
+        warning = (
+            f"La alerta agrupada se resolvió con {len(distinct_countries)} país(es) distinto(s) en las transacciones hijas; "
+            f"se esperaban al menos 2 para {resolved_rule_code}."
+        )
+
+    return resolved_alert_id, items, warning
 
 
 def _processed_file(run_id: str) -> Path:
@@ -298,6 +599,12 @@ def _enrich_summary_with_alerts(summary_df: pd.DataFrame, alerts_df: pd.DataFram
     else:
         alerts_work["_merchant_rubro_proxy"] = "UNKNOWN"
 
+    alert_reason_lookup: dict[str, Any] = {}
+    if "transaction_id" in alerts_work.columns and "alert_reason" in alerts_work.columns:
+        alert_reason_lookup = alerts_work.loc[alerts_work["transaction_id"].notna(), ["transaction_id", "alert_reason"]].copy()
+        alert_reason_lookup["transaction_id"] = alert_reason_lookup["transaction_id"].astype(str)
+        alert_reason_lookup = alert_reason_lookup.set_index("transaction_id")["alert_reason"].to_dict()
+
     tx_lookup: dict[str, Any] = {}
     if "transaction_id" in alerts_work.columns:
         tx_lookup = alerts_work.loc[alerts_work["transaction_id"].notna(), ["transaction_id", "_summary_date"]].copy()
@@ -347,6 +654,11 @@ def _enrich_summary_with_alerts(summary_df: pd.DataFrame, alerts_df: pd.DataFram
         row_dict["merchant_rubro_values"] = "|".join(mcc_values) if mcc_values else None
         if row_dict.get("merchant_rubro_proxy") in {None, "", "UNKNOWN"} and top_mcc is not None:
             row_dict["merchant_rubro_proxy"] = top_mcc
+
+        existing_countries = _collect_option_values(pd.Series([row_dict.get("countries_detected")]), tokenize=True, uppercase=True)
+        reason_countries = _country_codes_from_text(alert_reason_lookup.get(str(representative_transaction_id))) if representative_transaction_id else []
+        if reason_countries and (len(existing_countries) < 2 or set(existing_countries) != set(reason_countries)):
+            row_dict["countries_detected"] = "|".join(reason_countries)
         enriched_rows.append(row_dict)
 
     return pd.DataFrame(enriched_rows)
@@ -838,6 +1150,67 @@ def get_metrics(run_id: str = Query(...)) -> RuleMetricsResponse:
         alerts_by_mcc=_counts(alerts_df, "merchant_rubro_proxy"),
         alerts_by_country=_counts(alerts_df, "country_code"),
         top_customers=top_customers,
+    )
+
+
+@router.get("/customer-card-lookup", response_model=CustomerCardLookupResponse)
+def get_customer_card_lookup(
+    customer_hash: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_user_from_header),
+    _auth=Depends(require_permission("alert_detail")),
+) -> CustomerCardLookupResponse:
+    lookup = _lookup_customer_card(customer_hash)
+
+    try:
+        db.add(
+            SystemLog(
+                action="customer_card_lookup",
+                description=f"customer_hash={lookup['customer_hash']} lookup from rules detail",
+                user_id=getattr(current_user, "id", None),
+            )
+        )
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    return CustomerCardLookupResponse(**lookup)
+
+
+@router.get("/summary-transactions", response_model=SummaryTransactionsResponse)
+def get_summary_transactions(
+    run_id: str = Query(...),
+    alert_id: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_user_from_header),
+    _auth=Depends(require_permission("alert_detail")),
+) -> SummaryTransactionsResponse:
+    resolved_alert_id, items, warning = _load_summary_transactions_for_alert(run_id, alert_id)
+
+    try:
+        db.add(
+            SystemLog(
+                action="summary_transactions_lookup",
+                description=f"run_id={run_id} alert_id={resolved_alert_id} detail lookup from rules detail",
+                user_id=getattr(current_user, "id", None),
+            )
+        )
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    return SummaryTransactionsResponse(
+        run_id=run_id,
+        alert_id=resolved_alert_id,
+        total_transactions=int(len(items)),
+        items=[SummaryTransactionItem(**item) for item in items],
+        warning=warning,
     )
 
 
