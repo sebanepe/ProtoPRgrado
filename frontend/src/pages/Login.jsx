@@ -49,47 +49,47 @@ export default function Login({ checking = false }){
   }
 
   return (
-    <div style={{display:'flex',height:'100vh'}}>
-      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f1724 0%,#1f2937 100%)',color:'#fff'}}>
-        <div style={{maxWidth:420,padding:24}}>
+    <div className="login-shell">
+      <div className="login-hero">
+        <div className="login-hero-panel">
           <h1>Sistema de Detección de Fraude</h1>
-          <p style={{opacity:0.9}}>Plataforma de detección y análisis de fraude — accede para revisar alertas y operar modelos.</p>
+          <p>Plataforma de detección y análisis de fraude — accede para revisar alertas y operar modelos.</p>
         </div>
       </div>
-      <div style={{width:420,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{width:360}} className="card">
+      <div className="login-panel">
+        <div className="card login-card">
           <h3>{isRegistering ? 'Crear usuario' : 'Ingresar al Sistema'}</h3>
           <form onSubmit={isRegistering ? doRegister : submit}>
             {checking && (
-              <div style={{marginBottom:12, padding:8, background:'#f3f4f6', borderRadius:6, color:'#111'}}>Validando sesión...</div>
+              <div className="login-status">Validando sesión...</div>
             )}
             {isRegistering && <div className="form-row"><input className="input" placeholder="Nombre completo" value={fullName} onChange={e=>setFullName(e.target.value)} required/></div>}
             <div className="form-row"><input className="input" placeholder="Email" type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></div>
             <div className="form-row" style={{display:'flex',gap:8}}>
               <input className="input" placeholder="Contraseña" type={showPassword ? 'text' : 'password'} value={password} onChange={e=>setPassword(e.target.value)} required style={{flex:1}} />
-              <button type="button" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={()=>setShowPassword(s=>!s)} style={{padding:'6px 10px',borderRadius:6,border:'1px solid #ddd',background:'#f3f4f6',cursor:'pointer'}}>
+              <button type="button" className="button button-secondary password-toggle" aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick={()=>setShowPassword(s=>!s)}>
                 {showPassword ? 'Ocultar' : 'Mostrar'}
               </button>
             </div>
             {isRegistering && (
               <div className="form-row">
-                <label style={{display:'block',marginBottom:6}}>Rol</label>
+                <label>Rol</label>
                 <select className="input" value={role} onChange={e=>setRole(e.target.value)}>
                   <option value="FRAUD_ANALYST">Analista de Fraude</option>
                   <option value="DATA_SCIENTIST">Científico de Datos</option>
                 </select>
               </div>
             )}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <div className="login-links-row">
               <a href="#" onClick={(e)=>{e.preventDefault(); alert('Función de recuperación no configurada')}}>{isRegistering ? '¿Ya tienes cuenta? Iniciar sesión' : 'Recuperar contraseña'}</a>
-                <div style={{display:'flex',gap:8}}>
+                <div className="login-switchers">
                 <button type="button" className="button" onClick={()=>{ setIsRegistering(s=>!s); setError(null); }} disabled={checking}>{isRegistering ? 'Volver al login' : 'Crear usuario'}</button>
                 <button className="button" disabled={loading || checking} type="submit">{checking ? 'Validando...' : (loading ? (isRegistering ? 'Creando...' : 'Ingresando...') : (isRegistering ? 'Crear cuenta' : 'Ingresar al Sistema'))}</button>
               </div>
             </div>
-            {error && <div style={{color:'red',marginBottom:8}}>{error}</div>}
+            {error && <div className="error-text">{error}</div>}
           </form>
-          <div style={{fontSize:12,opacity:0.7,marginTop:12}}>© {new Date().getFullYear()} Sistema de Detección — Soporte: soporte@example.com</div>
+          <div className="login-footer">© {new Date().getFullYear()} Sistema de Detección — Soporte: soporte@example.com</div>
         </div>
       </div>
     </div>

@@ -4,12 +4,12 @@ import { getDashboardSummary } from '../services/api'
 
 function SimpleLineChart({points=[]}){
   // points: [{date, count}]
-  if(!points || points.length===0) return <div style={{height:80}}>No data</div>
+  if(!points || points.length===0) return <div style={{height:80, display:'grid', placeItems:'center', color:'var(--text-muted)'}}>No data</div>
   const max = Math.max(...points.map(p=>p.count))
   const w = 300, h=80, pad=10
   const step = (w-2*pad)/(points.length-1)
   const path = points.map((p,i)=> `${i===0?'M':'L'} ${pad + i*step} ${h - pad - (p.count/max)*(h-2*pad)}`).join(' ')
-  return <svg width={w} height={h}><path d={path} stroke="#2563eb" fill="none" strokeWidth={2} /></svg>
+  return <svg width={w} height={h}><path d={path} stroke="var(--accent-blue)" fill="none" strokeWidth={2.5} strokeLinecap="round" /></svg>
 }
 
 function SimplePie({fraud=0, normal=100}){
@@ -25,9 +25,9 @@ function SimplePie({fraud=0, normal=100}){
   const d = `M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z`
   return (
     <svg width={100} height={100} viewBox="0 0 100 100">
-      <circle cx={cx} cy={cy} r={radius} fill="#e6e7f0" />
-      <path d={d} fill="#ef4444" />
-      <circle cx={cx} cy={cy} r={radius-18} fill="white" />
+      <circle cx={cx} cy={cy} r={radius} fill="var(--bg-card-soft)" />
+      <path d={d} fill="var(--danger)" />
+      <circle cx={cx} cy={cy} r={radius-18} fill="var(--bg-card)" />
     </svg>
   )
 }
@@ -69,7 +69,7 @@ export default function Dashboard(){
 
       <div className="card" style={{marginTop:16}}>
         <h3>Alertas recientes</h3>
-        <table style={{width:'100%', borderCollapse:'collapse'}}>
+        <table className="table">
           <thead><tr><th>ID Alerta</th><th>Tx</th><th>Puntuación</th><th>Canal</th><th>Monto</th><th>Estado</th></tr></thead>
           <tbody>
             {(summary.recentAlerts||[]).map(a=> (

@@ -3,11 +3,10 @@ import { NavLink } from 'react-router-dom'
 
 const sections = [
   { title: 'Dashboard', items: [{to:'/', label:'Panel'}] },
-  { title: 'Data Pipeline', items: [{to:'/import', label:'Importación de Datos'}, {to:'/preprocessing', label:'Preprocesamiento'}] },
-  { title: 'Modelos', items: [{to:'/models/training', label:'Entrenamiento'}, {to:'/models/evaluation', label:'Evaluación de Modelos'}, {to:'/models', label:'Modelo Activo'}] },
-  { title: 'Fase B: Reglas', items: [{to:'/rules-alerts', label:'Reglas y Alertas'}] },
-  { title: 'Monitoreo', items: [{to:'/monitoring/scoring', label:'Scoring por Lotes'}, {to:'/alerts', label:'Alertas (Legacy)'}, {to:'/monitoring/cases', label:'Manejo de casos'}] },
-  { title: 'Reportes', items: [{to:'/reporting', label:'Analítica Avanzada'}, {to:'/reporting/export', label:'Exportación de Resultados'}] },
+  { title: 'Fase A: Data Pipeline', items: [{to:'/import', label:'Importación de Datos'}, {to:'/preprocessing', label:'Preprocesamiento'}] },
+  { title: 'Fase B: Alertas del Sistema', items: [{to:'/rules-alerts', label:'Reglas y Alertas'}] },
+  { title: 'Fase C: Modelos', items: [{to:'/models/training', label:'Entrenamiento'}, {to:'/models/evaluation', label:'Evaluación de Modelos'}, {to:'/models', label:'Modelo Activo'}] },
+  { title: 'Fase D: Monitoreo', items: [{to:'/monitoring/scoring', label:'Scoring por Lotes'}, {to:'/monitoring/cases', label:'Manejo de Casos'}] },
   { title: 'Administración', items: [{to:'/users', label:'Usuarios'}, {to:'/settings', label:'Configuración'}] }
 ]
 
@@ -15,7 +14,10 @@ export default function Sidebar() {
   const logout = () => { localStorage.removeItem('user'); window.location.reload(); }
   return (
     <aside className="sidebar">
-      <h2>Sistema de Detección de Fraude</h2>
+      <div className="sidebar-brand">
+        <div className="sidebar-brand-mark">FP</div>
+        <h2>Sistema de Detección y Monitoreo de Fraude</h2>
+      </div>
       <nav>
         {sections.map(s => (
           <div key={s.title} className="menu-section">
@@ -26,8 +28,8 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-      <div style={{marginTop:20}}>
-        <button className="button" onClick={logout}>Cerrar sesión</button>
+      <div className="sidebar-footer">
+        <button className="button button-secondary" onClick={logout}>Cerrar sesión</button>
       </div>
     </aside>
   )

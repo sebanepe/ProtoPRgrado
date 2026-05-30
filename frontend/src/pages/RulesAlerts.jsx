@@ -518,12 +518,10 @@ export default function RulesAlerts() {
                 <div
                   key={run.id}
                   onClick={() => setSelectedRun(run)}
+                  className={selectedRun?.id === run.id ? 'run-selector-card selected-run-card' : 'run-selector-card'}
                   style={{
                     padding: 12,
-                    border: selectedRun?.id === run.id ? '2px solid #2563eb' : '2px solid #ddd',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    backgroundColor: selectedRun?.id === run.id ? '#eff6ff' : '#fff'
+                    cursor: 'pointer'
                   }}
                 >
                   <div style={{ fontWeight: 'bold' }}>Run {run.id}</div>
@@ -552,7 +550,7 @@ export default function RulesAlerts() {
               </thead>
               <tbody>
                 {runs.map(run => (
-                  <tr key={run.id} style={{ backgroundColor: selectedRun?.id === run.id ? '#eff6ff' : '' }}>
+                  <tr key={run.id} className={selectedRun?.id === run.id ? 'selected-run-row' : ''}>
                     <td>{run.id}</td>
                     <td>{run.file || 'preprocessed_run_' + run.id}</td>
                     <td>{run.file_size ? (run.file_size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}</td>
@@ -805,37 +803,39 @@ export default function RulesAlerts() {
           )}
           {!loadingSummary && summary.length > 0 && (
             <div>
-              <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
                 Mostrando {summary.length} de {pagination.total} alertas agrupadas (página {pagination.page})
               </p>
-              <table className="table">
-                <thead>
-                  <tr>
-                    {summaryColumns.map(col => (
-                      <th key={col.key}>{col.title}</th>
-                    ))}
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.map((row, idx) => (
-                    <tr key={idx}>
+              <div className="table-scroll">
+                <table className="table alert-summary-table">
+                  <thead>
+                    <tr>
                       {summaryColumns.map(col => (
-                        <td key={col.key}>{row[col.key] || 'N/A'}</td>
+                        <th key={col.key}>{col.title}</th>
                       ))}
-                      <td style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          className="button"
-                          onClick={() => handleViewDetail(row)}
-                          style={{ fontSize: 12, padding: '6px 10px' }}
-                        >
-                          Ver Detalle
-                        </button>
-                      </td>
+                      <th>Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {summary.map((row, idx) => (
+                      <tr key={idx}>
+                        {summaryColumns.map(col => (
+                          <td key={col.key}>{row[col.key] || 'N/A'}</td>
+                        ))}
+                        <td style={{ display: 'flex', gap: 6, whiteSpace: 'nowrap' }}>
+                          <button
+                            className="button"
+                            onClick={() => handleViewDetail(row)}
+                            style={{ fontSize: 12, padding: '6px 10px' }}
+                          >
+                            Ver Detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {/* Pagination */}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16, alignItems: 'center' }}>
@@ -877,27 +877,31 @@ export default function RulesAlerts() {
           zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: '#fff',
+            backgroundColor: '#101b2a',
+            color: 'var(--text-main)',
             borderRadius: 8,
             padding: 24,
             maxWidth: '90%',
             maxHeight: '90vh',
             overflow: 'auto',
-            width: '800px'
+            width: '900px',
+            border: '1px solid rgba(36, 52, 71, 0.95)',
+            boxShadow: '0 18px 48px rgba(0, 0, 0, 0.5)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3>Detalle de Alerta Agrupada</h3>
-              <button onClick={() => setShowDetailModal(false)} style={{ fontSize: 20, background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+              <button className="icon-button" onClick={() => setShowDetailModal(false)} style={{ fontSize: 20 }}>×</button>
             </div>
 
-            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#fef3c7', borderRadius: 6 }}>
+            <div className="detail-note" style={{ marginBottom: 16, padding: 12, borderRadius: 6 }}>
               <strong>ℹ️ Nota:</strong> Esta alerta representa una señal de riesgo. No constituye fraude confirmado.
             </div>
 
             {/* Summary Alert Info */}
-            <div style={{ marginBottom: 16 }}>
+            <div className="detail-section" style={{ marginBottom: 16 }}>
               <h4>Información de Alerta Agrupada</h4>
-              <table className="table">
+              <div className="table-scroll">
+                <table className="table detail-table">
                 <tbody>
                   <tr>
                     <td style={{ fontWeight: 'bold', width: '30%' }}>ID Alerta:</td>
@@ -950,13 +954,14 @@ export default function RulesAlerts() {
                     </td>
                   </tr>
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
 
             {/* PHASE B.3: Status Update Section */}
-            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f3f4f6', borderRadius: 6 }}>
+            <div className="detail-section" style={{ marginBottom: 16, padding: 12, borderRadius: 6 }}>
               <h4>Revisión Humana - Cambiar Estado</h4>
-              <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
                 ⚠️ Confirmar fraude es una decisión del analista. El sistema no confirma fraude automáticamente.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -1009,13 +1014,7 @@ export default function RulesAlerts() {
                 </button>
               </div>
               {reviewMsg && (
-                <div style={{
-                  padding: 12,
-                  backgroundColor: reviewMsg.includes('Error') ? '#fee2e2' : '#ecfdf5',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  color: reviewMsg.includes('Error') ? '#991b1b' : '#065f46'
-                }}>
+                <div className={reviewMsg.includes('Error') ? 'detail-status detail-status-error' : 'detail-status detail-status-success'} style={{ padding: 12, borderRadius: 6, fontSize: 12 }}>
                   {reviewMsg}
                 </div>
               )}
@@ -1023,39 +1022,41 @@ export default function RulesAlerts() {
 
             {/* Review History */}
             {showHistoryTab && (
-              <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f9fafb', borderRadius: 6 }}>
+              <div className="detail-section" style={{ marginBottom: 16, padding: 12, borderRadius: 6 }}>
                 <h4>Historial de Revisiones</h4>
                 {loadingHistory && <div>Cargando historial...</div>}
                 {!loadingHistory && reviewHistory.length === 0 && (
-                  <div style={{ fontSize: 12, color: '#666' }}>No hay revisiones previas para esta alerta.</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No hay revisiones previas para esta alerta.</div>
                 )}
                 {!loadingHistory && reviewHistory.length > 0 && (
-                  <table className="table" style={{ fontSize: 11 }}>
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Estado Anterior</th>
-                        <th>Nuevo Estado</th>
-                        <th>Observaciones</th>
-                        <th>Revisor ID</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reviewHistory.map((entry, idx) => (
-                        <tr key={idx}>
-                          <td>{new Date(entry.reviewed_at).toLocaleString()}</td>
-                          <td>{entry.previous_status || 'N/A'}</td>
-                          <td style={{ fontWeight: 'bold', color: entry.new_status === 'CONFIRMED_FRAUD' ? '#dc2626' : '#2563eb' }}>
-                            {entry.new_status}
-                          </td>
-                          <td style={{ maxWidth: 250, wordBreak: 'break-word', fontSize: 11 }}>
-                            {entry.analyst_notes || '-'}
-                          </td>
-                          <td>{entry.reviewed_by_id || '-'}</td>
+                  <div className="table-scroll">
+                    <table className="table detail-table" style={{ fontSize: 11 }}>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Estado Anterior</th>
+                          <th>Nuevo Estado</th>
+                          <th>Observaciones</th>
+                          <th>Revisor ID</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {reviewHistory.map((entry, idx) => (
+                          <tr key={idx}>
+                            <td>{new Date(entry.reviewed_at).toLocaleString()}</td>
+                            <td>{entry.previous_status || 'N/A'}</td>
+                            <td style={{ fontWeight: 'bold', color: entry.new_status === 'CONFIRMED_FRAUD' ? '#ff7b89' : '#6aa9ff' }}>
+                              {entry.new_status}
+                            </td>
+                            <td style={{ maxWidth: 250, wordBreak: 'break-word', fontSize: 11 }}>
+                              {entry.analyst_notes || '-'}
+                            </td>
+                            <td>{entry.reviewed_by_id || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}
@@ -1066,36 +1067,38 @@ export default function RulesAlerts() {
               {loadingDetail && <div>Cargando transacciones...</div>}
               {!loadingDetail && detailAlerts.length === 0 && <div>No hay transacciones detalladas disponibles.</div>}
               {!loadingDetail && detailAlerts.length > 0 && (
-                <table className="table" style={{ fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Tx ID</th>
-                      <th>Fecha/Hora</th>
-                      <th>Monto</th>
-                      <th>País</th>
-                      <th>POS Mode</th>
-                      <th>MCC</th>
-                      <th>Score</th>
-                      <th>Razón</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailAlerts.map((alert, idx) => (
-                      <tr key={idx}>
-                        <td>{alert.alert_id || idx}</td>
-                        <td>{alert.transaction_id || 'N/A'}</td>
-                        <td>{alert.transaction_datetime || 'N/A'}</td>
-                        <td>{alert.amount || '0'}</td>
-                        <td>{alert.country_code || 'N/A'}</td>
-                        <td>{alert.pos_entry_mode || 'N/A'}</td>
-                        <td>{alert.merchant_rubro_proxy || 'N/A'}</td>
-                        <td>{alert.risk_score || 'N/A'}</td>
-                        <td style={{ maxWidth: 200, wordBreak: 'break-word' }}>{alert.alert_reason || 'N/A'}</td>
+                <div className="table-scroll">
+                  <table className="table detail-table" style={{ fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Tx ID</th>
+                        <th>Fecha/Hora</th>
+                        <th>Monto</th>
+                        <th>País</th>
+                        <th>POS Mode</th>
+                        <th>MCC</th>
+                        <th>Score</th>
+                        <th>Razón</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {detailAlerts.map((alert, idx) => (
+                        <tr key={idx}>
+                          <td>{alert.alert_id || idx}</td>
+                          <td>{alert.transaction_id || 'N/A'}</td>
+                          <td>{alert.transaction_datetime || 'N/A'}</td>
+                          <td>{alert.amount || '0'}</td>
+                          <td>{alert.country_code || 'N/A'}</td>
+                          <td>{alert.pos_entry_mode || 'N/A'}</td>
+                          <td>{alert.merchant_rubro_proxy || 'N/A'}</td>
+                          <td>{alert.risk_score || 'N/A'}</td>
+                          <td style={{ maxWidth: 200, wordBreak: 'break-word' }}>{alert.alert_reason || 'N/A'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 
@@ -1123,17 +1126,20 @@ export default function RulesAlerts() {
           zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: '#fff',
+            backgroundColor: '#101b2a',
+            color: 'var(--text-main)',
             borderRadius: 8,
             padding: 24,
             maxWidth: '90%',
             maxHeight: '90vh',
             overflow: 'auto',
-            width: '900px'
+            width: '900px',
+            border: '1px solid rgba(36, 52, 71, 0.95)',
+            boxShadow: '0 18px 48px rgba(0, 0, 0, 0.5)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3>Reporte de Reglas - Run {selectedRun?.id}</h3>
-              <button onClick={() => setShowReportModal(false)} style={{ fontSize: 20, background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+              <button className="icon-button" onClick={() => setShowReportModal(false)} style={{ fontSize: 20 }}>×</button>
             </div>
 
             {loadingReport && <div>Cargando reporte...</div>}
@@ -1144,8 +1150,7 @@ export default function RulesAlerts() {
                     📋 Copiar Contenido
                   </button>
                 </div>
-                <pre style={{
-                  backgroundColor: '#f5f5f5',
+                <pre className="report-pre" style={{
                   padding: 16,
                   borderRadius: 6,
                   overflow: 'auto',

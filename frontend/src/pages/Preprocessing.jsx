@@ -138,52 +138,56 @@ export default function Preprocessing(){
         {loadingDatasets && <div>Cargando...</div>}
         {!loadingDatasets && datasets.length===0 && <div>No hay datasets importados.</div>}
         {!loadingDatasets && datasets.length>0 && (
-          <table className="table">
-            <thead><tr><th>Id</th><th>Nombre</th><th>Archivo</th><th>Total</th><th>Válidos</th><th>Inválidos</th><th>Acciones</th></tr></thead>
-            <tbody>
-              {datasets.map(d=> (
-                <tr key={d.id}>
-                  <td>{d.id}</td>
-                  <td>{d.name}</td>
-                  <td>{d.original_filename}</td>
-                  <td>{d.total_records}</td>
-                  <td>{d.valid_records}</td>
-                  <td>{d.invalid_records}</td>
-                  <td style={{display:'flex',gap:8}}>
-                    <button className="button" onClick={()=>handlePreview(d.id)}>Previsualizar</button>
-                    <button className="button" onClick={()=>handleRunDataset(d.id)}>Procesar</button>
-                    <button className="button danger" onClick={()=>handleDelete(d.id)}>Borrar</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="table preprocessing-table">
+              <thead><tr><th>Id</th><th>Nombre</th><th>Archivo</th><th>Total</th><th>Válidos</th><th>Inválidos</th><th>Acciones</th></tr></thead>
+              <tbody>
+                {datasets.map(d=> (
+                  <tr key={d.id}>
+                    <td>{d.id}</td>
+                    <td>{d.name}</td>
+                    <td>{d.original_filename}</td>
+                    <td>{d.total_records}</td>
+                    <td>{d.valid_records}</td>
+                    <td>{d.invalid_records}</td>
+                    <td style={{display:'flex',gap:8,whiteSpace:'nowrap'}}>
+                      <button className="button" onClick={()=>handlePreview(d.id)}>Previsualizar</button>
+                      <button className="button" onClick={()=>handleRunDataset(d.id)}>Procesar</button>
+                      <button className="button danger" onClick={()=>handleDelete(d.id)}>Borrar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
           <div style={{marginTop:20}}>
             <h3>Ejecuciones de preprocesamiento</h3>
             {runs.length===0 && <div>No hay ejecuciones aún.</div>}
             {runs.length>0 && (
-              <table className="table">
-                <thead><tr><th>Id</th><th>Estado</th><th>Total</th><th>Procesados</th><th>Removidos</th><th>Acciones</th></tr></thead>
-                <tbody>
-                  {runs.map(rr=> (
-                    <tr key={rr.id}>
-                      <td>{rr.id}</td>
-                      <td>{rr.status}</td>
-                      <td>{rr.total_records}</td>
-                      <td>{rr.processed_records}</td>
-                      <td>{rr.removed_records}</td>
-                      <td style={{display:'flex',gap:8}}>
-                        <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
-                        <button className="button" onClick={()=>handleViewRunReport(rr.id)}>Ver reporte</button>
-                        <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
-                        <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table className="table preprocessing-table">
+                  <thead><tr><th>Id</th><th>Estado</th><th>Total</th><th>Procesados</th><th>Removidos</th><th>Acciones</th></tr></thead>
+                  <tbody>
+                    {runs.map(rr=> (
+                      <tr key={rr.id}>
+                        <td>{rr.id}</td>
+                        <td>{rr.status}</td>
+                        <td>{rr.total_records}</td>
+                        <td>{rr.processed_records}</td>
+                        <td>{rr.removed_records}</td>
+                        <td style={{display:'flex',gap:8,whiteSpace:'nowrap'}}>
+                          <button className="button" onClick={()=>handleRunPreview(rr.id)}>Previsualizar run</button>
+                          <button className="button" onClick={()=>handleViewRunReport(rr.id)}>Ver reporte</button>
+                          <button className="button" onClick={()=>handleDownloadRun(rr.id)}>Descargar CSV</button>
+                          <button className="button danger" onClick={()=>handleDeleteRun(rr.id)}>Borrar run</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -192,16 +196,18 @@ export default function Preprocessing(){
         {preview && preview.data && (
           <div style={{marginTop:12}}>
             <h4>Previsualización: {preview.data.dataset_id}</h4>
-            <table className="table small">
-              <thead>
-                <tr>{preview.data.columns.map(c=> <th key={c}>{c}</th>)}</tr>
-              </thead>
-              <tbody>
-                {preview.data.rows.map((r,idx)=> (
-                  <tr key={idx}>{preview.data.columns.map(c=> <td key={c}>{String(r[c] ?? '')}</td>)}</tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="table small preprocessing-table">
+                <thead>
+                  <tr>{preview.data.columns.map(c=> <th key={c}>{c}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {preview.data.rows.map((r,idx)=> (
+                    <tr key={idx}>{preview.data.columns.map(c=> <td key={c}>{String(r[c] ?? '')}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -213,27 +219,31 @@ export default function Preprocessing(){
             <div style={{display:'flex',gap:20}}>
               <div style={{flex:1}}>
                 <h5>Antes (DB)</h5>
-                <table className="table small">
-                  <thead><tr><th>transaction_id</th><th>amount</th><th>type</th><th>location</th><th>datetime</th><th>is_fraud</th></tr></thead>
-                  <tbody>
-                    {runPreview.data.before.map((r,idx)=> (
-                      <tr key={idx}><td>{r.transaction_id}</td><td>{r.amount}</td><td>{r.transaction_type}</td><td>{r.location}</td><td>{String(r.transaction_datetime)}</td><td>{String(r.is_fraud)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="table-scroll">
+                  <table className="table small preprocessing-table">
+                    <thead><tr><th>transaction_id</th><th>amount</th><th>type</th><th>location</th><th>datetime</th><th>is_fraud</th></tr></thead>
+                    <tbody>
+                      {runPreview.data.before.map((r,idx)=> (
+                        <tr key={idx}><td>{r.transaction_id}</td><td>{r.amount}</td><td>{r.transaction_type}</td><td>{r.location}</td><td>{String(r.transaction_datetime)}</td><td>{String(r.is_fraud)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <div style={{flex:1}}>
                 <h5>Después (Procesado)</h5>
-                <table className="table small">
-                  <thead>
-                    <tr>{(runPreview.data.after.length>0 ? Object.keys(runPreview.data.after[0]).slice(0,8) : []).map(c=> <th key={c}>{c}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {runPreview.data.after.map((r,idx)=> (
-                      <tr key={idx}>{Object.keys(r).slice(0,8).map(c=> <td key={c}>{String(r[c] ?? '')}</td>)}</tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="table-scroll">
+                  <table className="table small preprocessing-table">
+                    <thead>
+                      <tr>{(runPreview.data.after.length>0 ? Object.keys(runPreview.data.after[0]).slice(0,8) : []).map(c=> <th key={c}>{c}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {runPreview.data.after.map((r,idx)=> (
+                        <tr key={idx}>{Object.keys(r).slice(0,8).map(c=> <td key={c}>{String(r[c] ?? '')}</td>)}</tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -243,8 +253,8 @@ export default function Preprocessing(){
       <div style={{marginTop:10}} className="card">{msg || 'Presiona para ejecutar limpieza, normalización y anonimización'}</div>
 
       {showResultModal && (
-        <div style={{position:'fixed',left:0,top:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}} onClick={()=>setShowResultModal(false)}>
-          <div style={{width:700,maxWidth:'95%',background:'#fff',padding:20,borderRadius:6,boxShadow:'0 8px 30px rgba(0,0,0,0.2)'}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={()=>setShowResultModal(false)}>
+          <div className="modal-panel" onClick={e=>e.stopPropagation()}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <h3 style={{margin:0}}>Resultado del preprocesamiento</h3>
               <div>
@@ -258,7 +268,7 @@ export default function Preprocessing(){
                 <button className="button" onClick={()=>setShowResultDetailsJson(s=>!s)}>{showResultDetailsJson ? 'Ocultar detalles' : 'Ver detalles'}</button>
               </div>
               {showResultDetailsJson && (
-                <pre style={{marginTop:10,maxHeight:360,overflow:'auto',background:'#f7f7f7',padding:10,borderRadius:4}}>{JSON.stringify(resultDetails, null, 2)}</pre>
+                <pre className="code-panel">{JSON.stringify(resultDetails, null, 2)}</pre>
               )}
             </div>
           </div>

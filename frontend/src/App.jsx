@@ -10,8 +10,6 @@ import ModelTraining from './pages/ModelTraining'
 import ModelEvaluation from './pages/ModelEvaluation'
 import BatchScoring from './pages/BatchScoring'
 import Cases from './pages/Cases'
-import Reporting from './pages/Reporting'
-import Alerts from './pages/Alerts'
 import RulesAlerts from './pages/RulesAlerts'
 import Users from './pages/Users'
 import Settings from './pages/Settings'
@@ -80,8 +78,6 @@ function App() {
           <Route path="/models/evaluation" element={<ModelEvaluation />} />
           <Route path="/monitoring/scoring" element={<BatchScoring />} />
           <Route path="/monitoring/cases" element={<Cases />} />
-          <Route path="/reporting" element={<Reporting />} />
-          <Route path="/alerts" element={<Alerts />} />
           <Route path="/rules-alerts" element={<RulesAlerts />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<Settings />} />
