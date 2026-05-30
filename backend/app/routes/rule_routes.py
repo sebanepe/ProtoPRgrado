@@ -243,14 +243,208 @@ def _find_summary_alert_row(summary_df: pd.DataFrame, alert_id: str) -> Optional
     return match.head(1).iloc[0].to_dict()
 
 
+def _parse_id_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        text = str(value).strip()
+        if not text or text.lower() in {"nan", "none", "null"}:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            raw_values = parsed
+        else:
+            raw_values = [token.strip() for token in text.split("|") if token.strip()]
+
+    normalized: list[str] = []
+    for item in raw_values:
+        normalized_item = _normalize_filter_value(item)
+        if normalized_item and normalized_item not in normalized:
+            normalized.append(normalized_item)
+    return normalized
+
+
+def _parse_country_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        text = str(value).strip().upper()
+        if not text or text.lower() in {"nan", "none", "null"}:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            raw_values = parsed
+        else:
+            raw_values = [token.strip() for token in re.split(r"[^A-Z0-9]+", text) if token.strip()]
+
+    normalized: list[str] = []
+    for item in raw_values:
+        normalized_item = _normalize_filter_value(item, uppercase=True)
+        if normalized_item and len(normalized_item) == 2 and normalized_item not in normalized:
+            normalized.append(normalized_item)
+    return normalized
+
+
+def _rows_by_transaction_ids(dataframes: list[pd.DataFrame], transaction_ids: list[str]) -> list[dict[str, Any]]:
+    if not transaction_ids:
+        return []
+
+    row_map: dict[str, dict[str, Any]] = {}
+    for dataframe in dataframes:
+        if dataframe.empty or "transaction_id" not in dataframe.columns:
+            continue
+        for _, row in dataframe.iterrows():
+            transaction_id = _normalize_filter_value(row.get("transaction_id"))
+            if transaction_id and transaction_id not in row_map:
+                row_map[transaction_id] = row.to_dict()
+
+    resolved_rows: list[dict[str, Any]] = []
+    for transaction_id in transaction_ids:
+        row = row_map.get(transaction_id)
+        if row is not None:
+            resolved_rows.append(row)
+    return resolved_rows
+
+
+def _double_country_expected_countries(summary_row: dict[str, Any]) -> list[str]:
+    countries = _parse_country_list(summary_row.get("countries_detected"))
+    reason_countries = _country_codes_from_text(summary_row.get("alert_reason"))
+    for country in reason_countries:
+        if country not in countries:
+            countries.append(country)
+    return countries
+
+
+def _summary_transaction_bounds(summary_row: dict[str, Any]) -> tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    start = _parse_utc_timestamp(summary_row.get("window_start"))
+    end = _parse_utc_timestamp(summary_row.get("window_end"))
+    if start is not None and end is not None:
+        return start, end
+
+    anchor = start or end
+    if anchor is None:
+        return None, None
+
+    day_start = anchor.normalize()
+    return day_start, day_start + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+
+
+def _filter_double_country_rows(
+    dataframe: pd.DataFrame,
+    summary_row: dict[str, Any],
+    expected_countries: list[str],
+    *,
+    require_rule_code: bool,
+    day_scope: bool,
+) -> list[dict[str, Any]]:
+    if dataframe.empty:
+        return []
+
+    filtered = dataframe.copy()
+    source_run = _normalize_filter_value(summary_row.get("source_run"))
+    allowed_runs = {value for value in {source_run, _run_token_from_run_id(source_run)} if value} if source_run else set()
+    if "source_run" in filtered.columns and allowed_runs:
+        filtered = filtered.loc[filtered["source_run"].astype(str).str.strip().isin(allowed_runs)]
+
+    customer_hash = _normalize_filter_value(summary_row.get("customer_hash"))
+    if customer_hash and "customer_hash" in filtered.columns:
+        filtered = filtered.loc[filtered["customer_hash"].astype(str).str.strip() == customer_hash]
+
+    rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True)
+    if require_rule_code and rule_code and "rule_code" in filtered.columns:
+        filtered = filtered.loc[filtered["rule_code"].astype(str).str.strip().str.upper() == rule_code]
+
+    if expected_countries and "country_code" in filtered.columns:
+        filtered = filtered.loc[filtered["country_code"].astype(str).str.strip().str.upper().isin(expected_countries)]
+
+    start, end = _summary_transaction_bounds(summary_row)
+    if day_scope:
+        anchor = start or end
+        if anchor is not None:
+            start = anchor.normalize()
+            end = start + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    if start is not None and end is not None and "transaction_datetime" in filtered.columns:
+        transaction_datetimes = pd.to_datetime(filtered["transaction_datetime"], errors="coerce", utc=True)
+        filtered = filtered.loc[transaction_datetimes.between(start, end, inclusive="both")]
+
+    if rule_code and "CARD_ABSENT" in rule_code:
+        if "card_presence_type" in filtered.columns:
+            card_presence = filtered["card_presence_type"].astype(str).str.strip().str.upper()
+            absent_values = {"ABSENT", "CARD_ABSENT", "AP", "CA", "0"}
+            filtered = filtered.loc[card_presence.isin(absent_values)]
+
+    if filtered.empty:
+        return []
+
+    sort_columns = [column for column in ["transaction_datetime", "transaction_id"] if column in filtered.columns]
+    if sort_columns:
+        filtered = filtered.sort_values(sort_columns, na_position="last")
+
+    return filtered.to_dict(orient="records")
+
+
+def _reconstruct_double_country_summary_rows(
+    alerts_df: pd.DataFrame,
+    preprocessed_df: pd.DataFrame,
+    summary_row: dict[str, Any],
+    expected_countries: list[str],
+) -> list[dict[str, Any]]:
+    if len(expected_countries) < 2:
+        return []
+
+    collected_rows: list[dict[str, Any]] = []
+
+    def append_rows(rows: list[dict[str, Any]]) -> None:
+        collected_rows.extend(rows)
+
+    append_rows(_filter_double_country_rows(alerts_df, summary_row, expected_countries, require_rule_code=True, day_scope=False))
+    append_rows(_filter_double_country_rows(preprocessed_df, summary_row, expected_countries, require_rule_code=False, day_scope=False))
+
+    present_countries = {
+        _normalize_filter_value(row.get("country_code"), uppercase=True)
+        for row in collected_rows
+        if _normalize_filter_value(row.get("country_code"), uppercase=True)
+    }
+    missing_countries = [country for country in expected_countries if country not in present_countries]
+    if missing_countries:
+        append_rows(_filter_double_country_rows(alerts_df, summary_row, missing_countries, require_rule_code=True, day_scope=True))
+        append_rows(_filter_double_country_rows(preprocessed_df, summary_row, missing_countries, require_rule_code=False, day_scope=True))
+
+    seen_transaction_ids: set[str] = set()
+    deduplicated_rows: list[dict[str, Any]] = []
+    for row in collected_rows:
+        transaction_id = _normalize_filter_value(row.get("transaction_id"))
+        if transaction_id:
+            if transaction_id in seen_transaction_ids:
+                continue
+            seen_transaction_ids.add(transaction_id)
+        deduplicated_rows.append(row)
+
+    return deduplicated_rows
+
+
 def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[str, list[dict[str, Any]], Optional[str]]:
     alerts_path = _alerts_file(run_id)
     summary_path = _summary_file(run_id)
+    preprocessed_path = _processed_file(run_id)
 
     if not alerts_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Alerts not found for run_id={run_id}")
 
     alerts_df = _load_csv(alerts_path)
+    preprocessed_df = _load_csv(preprocessed_path) if preprocessed_path.exists() else pd.DataFrame()
     summary_df = _load_csv(summary_path) if summary_path.exists() else pd.DataFrame()
 
     summary_row = _find_summary_alert_row(summary_df, alert_id)
@@ -271,53 +465,78 @@ def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[st
     else:
         resolved_alert_id = _normalize_filter_value(summary_row.get("summary_alert_id")) or resolved_alert_id or str(alert_id)
         transaction_rows = []
-        if alerts_df.empty:
+        child_transaction_ids = _parse_id_list(summary_row.get("child_transaction_ids"))
+        expected_countries = _double_country_expected_countries(summary_row)
+        resolved_rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True)
+        is_double_country_rule = bool(resolved_rule_code and resolved_rule_code.startswith("RULE_DOUBLE_COUNTRY"))
+        double_country_rows_resolved = False
+        if child_transaction_ids:
+            transaction_rows = _rows_by_transaction_ids([alerts_df, preprocessed_df], child_transaction_ids)
+        if is_double_country_rule:
+            reconstructed_rows = _reconstruct_double_country_summary_rows(alerts_df, preprocessed_df, summary_row, expected_countries)
+            if reconstructed_rows:
+                transaction_rows_by_id = {
+                    _normalize_filter_value(row.get("transaction_id")): row
+                    for row in transaction_rows
+                    if _normalize_filter_value(row.get("transaction_id"))
+                }
+                for reconstructed_row in reconstructed_rows:
+                    transaction_id = _normalize_filter_value(reconstructed_row.get("transaction_id"))
+                    if transaction_id:
+                        if transaction_id not in transaction_rows_by_id:
+                            transaction_rows.append(reconstructed_row)
+                            transaction_rows_by_id[transaction_id] = reconstructed_row
+                    else:
+                        transaction_rows.append(reconstructed_row)
+                double_country_rows_resolved = True
+        if not child_transaction_ids and alerts_df.empty:
             return resolved_alert_id, transaction_rows, None
 
-        filtered = alerts_df.copy()
-        source_run = _normalize_filter_value(summary_row.get("source_run")) or _run_token_from_run_id(run_id)
-        allowed_runs = {source_run, _run_token_from_run_id(run_id), str(run_id).strip()}
-        allowed_runs = {value for value in allowed_runs if value}
+        if not child_transaction_ids and not double_country_rows_resolved:
+            filtered = alerts_df.copy()
+            source_run = _normalize_filter_value(summary_row.get("source_run")) or _run_token_from_run_id(run_id)
+            allowed_runs = {source_run, _run_token_from_run_id(run_id), str(run_id).strip()}
+            allowed_runs = {value for value in allowed_runs if value}
 
-        if "source_run" in filtered.columns and allowed_runs:
-            filtered = filtered.loc[filtered["source_run"].astype(str).str.strip().isin(allowed_runs)]
+            if "source_run" in filtered.columns and allowed_runs:
+                filtered = filtered.loc[filtered["source_run"].astype(str).str.strip().isin(allowed_runs)]
 
-        customer_hash = _normalize_filter_value(summary_row.get("customer_hash"))
-        if customer_hash and "customer_hash" in filtered.columns:
-            filtered = filtered.loc[filtered["customer_hash"].astype(str).str.strip() == customer_hash]
+            customer_hash = _normalize_filter_value(summary_row.get("customer_hash"))
+            if customer_hash and "customer_hash" in filtered.columns:
+                filtered = filtered.loc[filtered["customer_hash"].astype(str).str.strip() == customer_hash]
 
-        rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True)
-        if rule_code and "rule_code" in filtered.columns:
-            filtered = filtered.loc[filtered["rule_code"].astype(str).str.strip().str.upper() == rule_code]
+            rule_code = _normalize_filter_value(summary_row.get("rule_code"), uppercase=True)
+            if rule_code and "rule_code" in filtered.columns:
+                filtered = filtered.loc[filtered["rule_code"].astype(str).str.strip().str.upper() == rule_code]
 
-        summary_alert_id = _normalize_filter_value(summary_row.get("summary_alert_id"))
-        if summary_alert_id and "summary_alert_id" in filtered.columns:
-            exact_summary = filtered.loc[filtered["summary_alert_id"].astype(str).str.strip() == summary_alert_id]
-            if not exact_summary.empty:
-                filtered = exact_summary
+            summary_alert_id = _normalize_filter_value(summary_row.get("summary_alert_id"))
+            if summary_alert_id and "summary_alert_id" in filtered.columns:
+                exact_summary = filtered.loc[filtered["summary_alert_id"].astype(str).str.strip() == summary_alert_id]
+                if not exact_summary.empty:
+                    filtered = exact_summary
 
-        category = _summary_rule_category(rule_code)
-        if category == "mcc":
-            merchant_rubro_proxy = _normalize_filter_value(summary_row.get("merchant_rubro_proxy"), uppercase=True) or _normalize_filter_value(summary_row.get("top_merchant_rubro_proxy"), uppercase=True)
-            if merchant_rubro_proxy and merchant_rubro_proxy not in {"UNKNOWN", "NONE", "NULL", "NAN"} and "merchant_rubro_proxy" in filtered.columns:
-                filtered = filtered.loc[filtered["merchant_rubro_proxy"].astype(str).str.strip().str.upper() == merchant_rubro_proxy]
+            category = _summary_rule_category(rule_code)
+            if category == "mcc":
+                merchant_rubro_proxy = _normalize_filter_value(summary_row.get("merchant_rubro_proxy"), uppercase=True) or _normalize_filter_value(summary_row.get("top_merchant_rubro_proxy"), uppercase=True)
+                if merchant_rubro_proxy and merchant_rubro_proxy not in {"UNKNOWN", "NONE", "NULL", "NAN"} and "merchant_rubro_proxy" in filtered.columns:
+                    filtered = filtered.loc[filtered["merchant_rubro_proxy"].astype(str).str.strip().str.upper() == merchant_rubro_proxy]
 
-        start = _parse_utc_timestamp(summary_row.get("window_start"))
-        end = _parse_utc_timestamp(summary_row.get("window_end"))
-        if start is not None and end is not None and "transaction_datetime" in filtered.columns:
-            transaction_datetimes = pd.to_datetime(filtered["transaction_datetime"], errors="coerce", utc=True)
-            filtered = filtered.loc[transaction_datetimes.between(start, end, inclusive="both")]
+            start = _parse_utc_timestamp(summary_row.get("window_start"))
+            end = _parse_utc_timestamp(summary_row.get("window_end"))
+            if start is not None and end is not None and "transaction_datetime" in filtered.columns:
+                transaction_datetimes = pd.to_datetime(filtered["transaction_datetime"], errors="coerce", utc=True)
+                filtered = filtered.loc[transaction_datetimes.between(start, end, inclusive="both")]
 
-        if filtered.empty and summary_row.get("representative_transaction_id") and "transaction_id" in alerts_df.columns:
-            representative_id = str(summary_row.get("representative_transaction_id")).strip()
-            filtered = alerts_df.loc[alerts_df["transaction_id"].astype(str).str.strip() == representative_id]
+            if filtered.empty and summary_row.get("representative_transaction_id") and "transaction_id" in alerts_df.columns:
+                representative_id = str(summary_row.get("representative_transaction_id")).strip()
+                filtered = alerts_df.loc[alerts_df["transaction_id"].astype(str).str.strip() == representative_id]
 
-        if not filtered.empty:
-            sort_columns = [column for column in ["transaction_datetime", "transaction_id"] if column in filtered.columns]
-            if sort_columns:
-                filtered = filtered.sort_values(sort_columns, na_position="last")
+            if not filtered.empty:
+                sort_columns = [column for column in ["transaction_datetime", "transaction_id"] if column in filtered.columns]
+                if sort_columns:
+                    filtered = filtered.sort_values(sort_columns, na_position="last")
 
-        transaction_rows = filtered.to_dict(orient="records")
+            transaction_rows = filtered.to_dict(orient="records")
 
     customer_lookup_cache: dict[str, dict[str, Any]] = {}
     items: list[dict[str, Any]] = []
@@ -352,12 +571,24 @@ def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[st
         if country and country not in distinct_countries:
             distinct_countries.append(country)
 
+    summary_countries = _double_country_expected_countries(summary_row) if summary_row is not None else []
+
     warning = None
-    if resolved_rule_code and resolved_rule_code.startswith("RULE_DOUBLE_COUNTRY") and len(distinct_countries) < 2:
-        warning = (
-            f"La alerta agrupada se resolvió con {len(distinct_countries)} país(es) distinto(s) en las transacciones hijas; "
-            f"se esperaban al menos 2 para {resolved_rule_code}."
-        )
+    if resolved_rule_code and resolved_rule_code.startswith("RULE_DOUBLE_COUNTRY"):
+        missing_countries = [country for country in summary_countries if country not in distinct_countries]
+        if missing_countries:
+            if len(missing_countries) == 1 and summary_countries:
+                warning = f"La alerta indica países {'|'.join(summary_countries)}, pero no se encontró transacción hija para {missing_countries[0]}."
+            else:
+                warning = (
+                    f"La alerta indica países {'|'.join(summary_countries) if summary_countries else 'desconocidos'}, "
+                    f"pero no se encontraron transacciones hijas para {', '.join(missing_countries)}."
+                )
+        elif len(distinct_countries) < 2:
+            warning = (
+                f"La alerta agrupada se resolvió con {len(distinct_countries)} país(es) distinto(s) en las transacciones hijas; "
+                f"se esperaban al menos 2 para {resolved_rule_code}."
+            )
 
     return resolved_alert_id, items, warning
 

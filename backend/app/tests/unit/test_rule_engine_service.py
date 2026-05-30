@@ -100,8 +100,65 @@ def test_double_country_summary_groups_by_customer_and_date():
     assert str(row["rule_code"]).startswith("RULE_DOUBLE_COUNTRY")
     assert row["count_transactions"] == 3
     assert row["countries_detected"] == "AR|BO"
+    assert row["child_alert_ids"] == "26-000001|26-000002|26-000003"
+    assert row["child_transaction_ids"] == "tx-1|tx-2|tx-3"
     assert row["representative_transaction_id"] == "tx-1"
     assert str(row["status"]).upper() == "NEW"
+
+
+def test_double_country_summary_uses_alert_reason_countries_and_child_ids():
+    alerts_df = pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000101",
+                "source_run": "26",
+                "transaction_id": "tx-101",
+                "customer_hash": "cust-1",
+                "transaction_datetime": "2026-05-28T10:00:00+00:00",
+                "amount": 10.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "has_pinblock": 0,
+                "merchant_rubro_proxy": "5411",
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "risk_level": "HIGH",
+                "risk_score": 85,
+                "alert_reason": "Cliente anonimizado registra operaciones presenciales en más de un país durante el mismo día. Countries: AW, BO",
+                "triggered_rules": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "status": "NEW",
+                "created_at": "2026-05-28T10:10:00+00:00",
+            },
+            {
+                "alert_id": "26-000102",
+                "source_run": "26",
+                "transaction_id": "tx-102",
+                "customer_hash": "cust-1",
+                "transaction_datetime": "2026-05-28T10:05:00+00:00",
+                "amount": 20.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "has_pinblock": 1,
+                "merchant_rubro_proxy": "5411",
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "risk_level": "HIGH",
+                "risk_score": 85,
+                "alert_reason": "Cliente anonimizado registra operaciones presenciales en más de un país durante el mismo día. Countries: AW, BO",
+                "triggered_rules": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "status": "NEW",
+                "created_at": "2026-05-28T10:10:00+00:00",
+            },
+        ]
+    )
+
+    summary_df = build_alert_summary_df(alerts_df)
+
+    assert len(summary_df) == 1
+    row = summary_df.iloc[0]
+    assert row["countries_detected"] == "AW|BO"
+    assert row["child_alert_ids"] == "26-000101|26-000102"
+    assert row["child_transaction_ids"] == "tx-101|tx-102"
 
 
 def test_summary_validator_accepts_grouped_summary(tmp_path):

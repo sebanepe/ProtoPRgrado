@@ -22,6 +22,8 @@ REQUIRED_COLUMNS = {
     "max_risk_score",
     "count_transactions",
     "countries_detected",
+    "child_alert_ids",
+    "child_transaction_ids",
     "window_start",
     "window_end",
     "representative_transaction_id",

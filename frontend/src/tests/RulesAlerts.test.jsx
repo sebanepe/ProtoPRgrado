@@ -145,7 +145,7 @@ beforeEach(() => {
         transaction_id: 'tx-002',
         transaction_datetime: '2026-04-14T00:15:00.000000+00:00',
         amount: 88,
-        country_code: 'AR',
+        country_code: 'AW',
         pos_entry_mode: '7',
         merchant_rubro_proxy: '5944',
         merchant_name: 'Mercado Dos',
@@ -418,13 +418,53 @@ describe('RulesAlerts page', () => {
       expect(api.getRuleSummaryTransactions).toHaveBeenCalledWith('preprocessed_run_26', '26-S-000001')
       expect(screen.getByText(/Estas son las transacciones que componen la alerta agrupada/)).toBeTruthy()
       expect(screen.getByText('2026-04-14 00:07:46', { selector: 'td' })).toBeTruthy()
+      expect(screen.getAllByText('AW').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('BO').length).toBeGreaterThan(0)
       expect(screen.getAllByText('469826******8047').length).toBeGreaterThanOrEqual(2)
       expect(screen.queryByText('4698261234568047')).toBeNull()
+      expect(screen.queryByText(/La alerta agrupada se resolvió/)).toBeNull()
     })
 
     fireEvent.click(screen.getByRole('button', { name: /Ocultar transacciones/ }))
     await waitFor(() => {
       expect(screen.queryByText(/Estas son las transacciones que componen la alerta agrupada/)).toBeNull()
+    })
+  })
+
+  it('shows grouped transaction warning only when backend returns one', async () => {
+    api.getRulesSummary.mockResolvedValue(summaryPage1)
+    api.getRuleSummaryTransactions.mockResolvedValue({
+      run_id: 'preprocessed_run_26',
+      alert_id: '26-S-000001',
+      total_transactions: 2,
+      warning: 'La alerta agrupada se resolvió con 1 país(es) distinto(s) en las transacciones hijas; se esperaban al menos 2 para RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY.',
+      items: [
+        {
+          transaction_id: 'tx-001',
+          transaction_datetime: '2026-04-14T00:07:46.000000+00:00',
+          amount: 123.45,
+          country_code: 'BO',
+          pos_entry_mode: '7',
+          merchant_rubro_proxy: '5944',
+          merchant_name: 'Mercado Uno',
+          has_pinblock: 0,
+          risk_score: 85,
+          customer_hash: 'cust-1',
+          masked_card: '469826******8047'
+        }
+      ]
+    })
+
+    render(<RulesAlerts />)
+
+    await waitFor(() => expect(api.getPreprocessedRuns).toHaveBeenCalled())
+    fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Ver Detalle/ }).length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole('button', { name: /Ver Detalle/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /Ver transacciones detectadas/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/La alerta agrupada se resolvió con 1 país/)).toBeTruthy()
     })
   })
 

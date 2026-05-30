@@ -115,6 +115,8 @@ SUMMARY_COLUMNS = [
     "window_start",
     "window_end",
     "representative_transaction_id",
+    "child_alert_ids",
+    "child_transaction_ids",
     "status",
     "created_at",
 ]
@@ -156,6 +158,32 @@ def _normalize_text(value: Any, default: str = "UNKNOWN") -> str:
 def _normalize_mcc_value(value: Any) -> str:
     normalized = _normalize_text(value, default="UNKNOWN")
     return normalized.upper()
+
+
+def _country_codes_from_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+
+    text = str(value).upper()
+    match = re.search(r"COUNTRIES\s*:\s*([^\.\n;]+)", text)
+    if not match:
+        return []
+
+    countries: list[str] = []
+    for token in re.split(r"[^A-Z0-9]+", match.group(1).upper()):
+        token = token.strip()
+        if len(token) == 2 and token.isalpha() and token not in countries:
+            countries.append(token)
+    return countries
+
+
+def _join_unique_values(values: list[Any]) -> str:
+    normalized_values: list[str] = []
+    for value in values:
+        normalized_value = _normalize_text(value)
+        if normalized_value and normalized_value not in normalized_values:
+            normalized_values.append(normalized_value)
+    return "|".join(normalized_values)
 
 
 def _summary_rule_category(rule_code: str) -> str:
@@ -246,7 +274,17 @@ def build_alert_summary_df(alerts_df: pd.DataFrame) -> pd.DataFrame:
             for value in country_source.tolist()
             if _normalize_text(value) not in {"UNKNOWN"}
         ]
-        countries_detected = "|".join(sorted(set(country_values))) if country_values else "UNKNOWN"
+        if rule_code.startswith("RULE_DOUBLE_COUNTRY") and "alert_reason" in sorted_group.columns:
+            reason_country_values: list[str] = []
+            for reason_value in sorted_group["alert_reason"].tolist():
+                for country_code in _country_codes_from_text(reason_value):
+                    if country_code not in reason_country_values:
+                        reason_country_values.append(country_code)
+            country_values = reason_country_values + [country for country in country_values if country not in reason_country_values]
+        countries_detected = _join_unique_values(country_values) if country_values else "UNKNOWN"
+
+        child_alert_ids = _join_unique_values(sorted_group["alert_id"].tolist() if "alert_id" in sorted_group.columns else [])
+        child_transaction_ids = _join_unique_values(sorted_group["transaction_id"].tolist() if "transaction_id" in sorted_group.columns else [])
 
         rubro_counter = Counter(
             value
@@ -277,6 +315,8 @@ def build_alert_summary_df(alerts_df: pd.DataFrame) -> pd.DataFrame:
                 "window_start": sorted_group["transaction_datetime"].min().isoformat() if sorted_group["transaction_datetime"].notna().any() else None,
                 "window_end": sorted_group["transaction_datetime"].max().isoformat() if sorted_group["transaction_datetime"].notna().any() else None,
                 "representative_transaction_id": _normalize_text(first_row.get("transaction_id")),
+                "child_alert_ids": child_alert_ids,
+                "child_transaction_ids": child_transaction_ids,
                 "status": "NEW",
                 "created_at": created_at,
             }

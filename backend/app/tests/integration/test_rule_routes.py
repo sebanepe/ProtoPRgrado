@@ -99,6 +99,8 @@ def _write_sample_rule_files(base_dir: Path) -> None:
                 "max_risk_score": 0.96,
                 "count_transactions": 2,
                 "countries_detected": "[\"BO\",\"US\"]",
+                "child_alert_ids": "26-000001|26-000002",
+                "child_transaction_ids": "tx-1|tx-2",
                 "window_start": "2026-05-28T10:00:00+00:00",
                 "window_end": "2026-05-28T10:05:00+00:00",
                 "representative_transaction_id": "tx-1",
@@ -115,6 +117,8 @@ def _write_sample_rule_files(base_dir: Path) -> None:
                 "max_risk_score": 0.88,
                 "count_transactions": 1,
                 "countries_detected": "[\"BO\"]",
+                "child_alert_ids": "26-000003",
+                "child_transaction_ids": "tx-3",
                 "window_start": "2026-05-28T11:00:00+00:00",
                 "window_end": "2026-05-28T11:00:00+00:00",
                 "representative_transaction_id": "tx-3",
@@ -131,6 +135,8 @@ def _write_sample_rule_files(base_dir: Path) -> None:
                 "max_risk_score": 0.73,
                 "count_transactions": 1,
                 "countries_detected": "[\"AR\"]",
+                "child_alert_ids": "26-000004",
+                "child_transaction_ids": "tx-4",
                 "window_start": "2026-05-28T12:00:00+00:00",
                 "window_end": "2026-05-28T12:00:00+00:00",
                 "representative_transaction_id": "tx-4",
@@ -162,6 +168,8 @@ def _write_large_summary_rule_files(base_dir: Path) -> None:
                 "max_risk_score": 85.0 if index % 2 else 65.0,
                 "count_transactions": index,
                 "countries_detected": "BO|AR" if index % 2 else "BO",
+                "child_alert_ids": "|".join([f"26-{index:06d}"] * max(index, 1)),
+                "child_transaction_ids": "|".join([f"tx-{index}"] * max(index, 1)),
                 "window_start": f"2026-05-28T10:{index:02d}:00+00:00",
                 "window_end": f"2026-05-28T10:{index + 1:02d}:00+00:00",
                 "representative_transaction_id": f"tx-{index}",
@@ -226,7 +234,7 @@ def _write_customer_card_lookup_files(base_dir: Path) -> str:
     return customer_hash
 
 
-def _write_summary_transactions_rule_files(base_dir: Path, customer_hash: str, *, include_alert_rows: bool = True) -> str:
+def _write_summary_transactions_rule_files(base_dir: Path, customer_hash: str, *, include_alert_rows: bool = True, include_child_ids: bool = True) -> str:
     base_dir.mkdir(parents=True, exist_ok=True)
 
     summary_alert_id = "26-S-5186b35686f8"
@@ -241,6 +249,7 @@ def _write_summary_transactions_rule_files(base_dir: Path, customer_hash: str, *
             "max_risk_score": 95.0,
             "count_transactions": 3,
             "countries_detected": "BO|AR",
+            **({"child_alert_ids": "26-000101|26-000102|26-000103", "child_transaction_ids": "tx-001|tx-002|tx-003"} if include_child_ids else {}),
             "merchant_rubro_proxy": "5944",
             "window_start": "2026-04-14T00:00:00+00:00",
             "window_end": "2026-04-14T00:30:00+00:00",
@@ -329,6 +338,220 @@ def _write_summary_transactions_rule_files(base_dir: Path, customer_hash: str, *
         pd.DataFrame(columns=["alert_id", "source_run", "transaction_id", "customer_hash", "transaction_datetime", "amount", "country_code", "pos_entry_mode", "merchant_rubro_proxy", "merchant_name", "has_pinblock", "risk_score", "rule_code", "rule_name", "status"]).to_csv(base_dir / "alerts_run_26.csv", index=False)
 
     pd.DataFrame(summary_rows).to_csv(base_dir / "alerts_summary_run_26.csv", index=False)
+    return summary_alert_id
+
+
+def _write_summary_transactions_double_country_aw_bo_files(
+    base_dir: Path,
+    customer_hash: str,
+    *,
+    include_aw_preprocessed: bool = True,
+    narrowed_window: bool = False,
+) -> str:
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_alert_id = "26-S-AW-BO-0001"
+    pd.DataFrame(
+        [
+            {
+                "summary_alert_id": summary_alert_id,
+                "source_run": "26",
+                "customer_hash": customer_hash,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "risk_level": "HIGH",
+                "max_risk_score": 95.0,
+                "count_transactions": 4,
+                "countries_detected": "AW|BO",
+                "alert_reason": "Countries: AW, BO",
+                "child_alert_ids": "26-000201|26-000202|26-000203",
+                "child_transaction_ids": "tx_dd46d83098108114|tx_66388fe04992501e|tx_8a9f4d611a19303f",
+                "merchant_rubro_proxy": "5944",
+                "window_start": "2026-04-14T00:00:00+00:00",
+                "window_end": "2026-04-14T15:30:57.643000+00:00" if narrowed_window else "2026-04-14T23:59:59+00:00",
+                "representative_transaction_id": "tx_8a9f4d611a19303f",
+                "status": "NEW",
+                "created_at": "2026-04-14T01:00:00+00:00",
+            }
+        ]
+    ).to_csv(base_dir / "alerts_summary_run_26.csv", index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000201",
+                "source_run": "26",
+                "transaction_id": "tx_dd46d83098108114",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T15:30:57.643000+00:00",
+                "amount": 41.25,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Uno",
+                "has_pinblock": 0,
+                "risk_score": 85,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+            {
+                "alert_id": "26-000202",
+                "source_run": "26",
+                "transaction_id": "tx_66388fe04992501e",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:17:22.969000+00:00",
+                "amount": 88.0,
+                "country_code": "BO",
+                "pos_entry_mode": "7",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Dos",
+                "has_pinblock": 1,
+                "risk_score": 91,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+            {
+                "alert_id": "26-000203",
+                "source_run": "26",
+                "transaction_id": "tx_8a9f4d611a19303f",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-14T00:07:46.246000+00:00",
+                "amount": 59.5,
+                "country_code": "BO",
+                "pos_entry_mode": "5",
+                "merchant_rubro_proxy": "5944",
+                "merchant_name": "Mercado Tres",
+                "has_pinblock": 0,
+                "risk_score": 95,
+                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
+                "rule_name": "Double country card present same day",
+                "status": "NEW",
+                "pan_card": "4698261234568047",
+            },
+        ]
+    ).to_csv(base_dir / "alerts_run_26.csv", index=False)
+
+    preprocessed_rows = [
+        {
+            "transaction_id": "tx_dd46d83098108114",
+            "amount": 41.25,
+            "transaction_type": 1,
+            "channel": "LPZ1POSID4",
+            "location": "EL ALTO",
+            "device_id": "04401901",
+            "customer_hash": customer_hash,
+            "merchant_hash": "merch_bo_1",
+            "merchant_code": "000000430286",
+            "terminal_code": "04401901",
+            "merchant_name": "Mercado Uno",
+            "merchant_rubro_proxy": "5944",
+            "country_code": "BO",
+            "pos_entry_mode": "7",
+            "has_pinblock": 0,
+            "card_brand": "UNKNOWN",
+            "transaction_datetime": "2026-04-14 15:30:57.643",
+            "has_pinblock_source": "raw",
+            "hour": 15,
+            "day": 14,
+            "weekday": 2,
+            "is_weekend": 0,
+            "is_night": 0,
+            "is_international": 0,
+            "card_presence_type": "TP",
+        },
+        {
+            "transaction_id": "tx_66388fe04992501e",
+            "amount": 88.0,
+            "transaction_type": 1,
+            "channel": "LPZ1POSID4",
+            "location": "LA PAZ",
+            "device_id": "04401901",
+            "customer_hash": customer_hash,
+            "merchant_hash": "merch_bo_2",
+            "merchant_code": "000000430286",
+            "terminal_code": "04401901",
+            "merchant_name": "Mercado Dos",
+            "merchant_rubro_proxy": "5944",
+            "country_code": "BO",
+            "pos_entry_mode": "7",
+            "has_pinblock": 1,
+            "card_brand": "UNKNOWN",
+            "transaction_datetime": "2026-04-14 00:17:22.969",
+            "has_pinblock_source": "raw",
+            "hour": 0,
+            "day": 14,
+            "weekday": 2,
+            "is_weekend": 0,
+            "is_night": 1,
+            "is_international": 0,
+            "card_presence_type": "TP",
+        },
+        {
+            "transaction_id": "tx_8a9f4d611a19303f",
+            "amount": 59.5,
+            "transaction_type": 1,
+            "channel": "LPZ1POSID4",
+            "location": "LA PAZ",
+            "device_id": "04401901",
+            "customer_hash": customer_hash,
+            "merchant_hash": "merch_bo_3",
+            "merchant_code": "000000430286",
+            "terminal_code": "04401901",
+            "merchant_name": "Mercado Tres",
+            "merchant_rubro_proxy": "5944",
+            "country_code": "BO",
+            "pos_entry_mode": "5",
+            "has_pinblock": 0,
+            "card_brand": "UNKNOWN",
+            "transaction_datetime": "2026-04-14 00:07:46.246",
+            "has_pinblock_source": "raw",
+            "hour": 0,
+            "day": 14,
+            "weekday": 2,
+            "is_weekend": 0,
+            "is_night": 1,
+            "is_international": 0,
+            "card_presence_type": "TP",
+        },
+    ]
+
+    if include_aw_preprocessed:
+        preprocessed_rows.insert(
+            0,
+            {
+                "transaction_id": "tx_12b1c7eba9876095",
+                "amount": 32.0,
+                "transaction_type": 1,
+                "channel": "LPZ1POSID4",
+                "location": "COCHABAMBA",
+                "device_id": "04401901",
+                "customer_hash": customer_hash,
+                "merchant_hash": "merch_aw_1",
+                "merchant_code": "000000430286",
+                "terminal_code": "04401901",
+                "merchant_name": "Mercado AW",
+                "merchant_rubro_proxy": "5944",
+                "country_code": "AW",
+                "pos_entry_mode": "7",
+                "has_pinblock": 0,
+                "card_brand": "UNKNOWN",
+                "transaction_datetime": "2026-04-14 23:40:32.407",
+                "has_pinblock_source": "raw",
+                "hour": 23,
+                "day": 14,
+                "weekday": 2,
+                "is_weekend": 0,
+                "is_night": 1,
+                "is_international": 0,
+                "card_presence_type": "TP",
+            },
+        )
+
+    pd.DataFrame(preprocessed_rows).to_csv(base_dir / "preprocessed_run_26.csv", index=False)
     return summary_alert_id
 
 
@@ -492,72 +715,71 @@ def test_summary_transactions_returns_grouped_transactions(monkeypatch, test_cli
     assert "pan_card" not in response.text
 
 
+def test_summary_transactions_reconstructs_double_country_transactions_from_preprocessed(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    summary_alert_id = _write_summary_transactions_double_country_aw_bo_files(processed_dir, customer_hash, include_aw_preprocessed=True)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "preprocessed_run_26"
+    assert payload["alert_id"] == summary_alert_id
+    assert payload["warning"] is None
+    assert payload["total_transactions"] == len(payload["items"])
+    assert any(item["country_code"] == "AW" for item in payload["items"])
+    assert any(item["country_code"] == "BO" for item in payload["items"])
+    countries = []
+    for item in payload["items"]:
+        country = item["country_code"]
+        if country and country not in countries:
+            countries.append(country)
+    assert set(countries) == {"AW", "BO"}
+    assert "4698261234568047" not in response.text
+    assert "confirmed_fraud" not in response.text
+
+
+def test_summary_transactions_reconstructs_missing_country_with_day_scope(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    summary_alert_id = _write_summary_transactions_double_country_aw_bo_files(
+        processed_dir,
+        customer_hash,
+        include_aw_preprocessed=True,
+        narrowed_window=True,
+    )
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    countries = {
+        item["country_code"]
+        for item in payload["items"]
+        if item.get("country_code")
+    }
+    assert countries == {"AW", "BO"}
+    assert payload["warning"] is None
+
+
 def test_summary_transactions_warns_when_double_country_resolves_to_one_country(monkeypatch, test_client, tmp_path):
     processed_dir = tmp_path / "processed"
     uploads_dir = tmp_path / "uploads"
     customer_hash = _write_customer_card_lookup_files(uploads_dir)
-    processed_dir.mkdir(parents=True, exist_ok=True)
-
-    summary_alert_id = "26-S-WARN-0001"
-    pd.DataFrame(
-        [
-            {
-                "summary_alert_id": summary_alert_id,
-                "source_run": "26",
-                "customer_hash": customer_hash,
-                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
-                "rule_name": "Double country card present same day",
-                "risk_level": "HIGH",
-                "max_risk_score": 95.0,
-                "count_transactions": 2,
-                "countries_detected": "BO",
-                "merchant_rubro_proxy": "5944",
-                "window_start": "2026-04-14T00:00:00+00:00",
-                "window_end": "2026-04-14T00:30:00+00:00",
-                "representative_transaction_id": "tx-001",
-                "status": "NEW",
-                "created_at": "2026-04-14T01:00:00+00:00",
-            }
-        ]
-    ).to_csv(processed_dir / "alerts_summary_run_26.csv", index=False)
-    pd.DataFrame(
-        [
-            {
-                "alert_id": "26-000001",
-                "source_run": "26",
-                "transaction_id": "tx-001",
-                "customer_hash": customer_hash,
-                "transaction_datetime": "2026-04-14T00:07:46+00:00",
-                "amount": 123.45,
-                "country_code": "BO",
-                "pos_entry_mode": "7",
-                "merchant_rubro_proxy": "5944",
-                "merchant_name": "Mercado Uno",
-                "has_pinblock": 0,
-                "risk_score": 85,
-                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
-                "rule_name": "Double country card present same day",
-                "status": "NEW",
-            },
-            {
-                "alert_id": "26-000002",
-                "source_run": "26",
-                "transaction_id": "tx-002",
-                "customer_hash": customer_hash,
-                "transaction_datetime": "2026-04-14T00:15:00+00:00",
-                "amount": 88.0,
-                "country_code": "BO",
-                "pos_entry_mode": "7",
-                "merchant_rubro_proxy": "5944",
-                "merchant_name": "Mercado Dos",
-                "has_pinblock": 1,
-                "risk_score": 91,
-                "rule_code": "RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY",
-                "rule_name": "Double country card present same day",
-                "status": "NEW",
-            },
-        ]
-    ).to_csv(processed_dir / "alerts_run_26.csv", index=False)
+    summary_alert_id = _write_summary_transactions_double_country_aw_bo_files(processed_dir, customer_hash, include_aw_preprocessed=False)
     monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
     monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
 
@@ -569,7 +791,26 @@ def test_summary_transactions_warns_when_double_country_resolves_to_one_country(
     assert response.status_code == 200
     payload = response.json()
     assert payload["warning"] is not None
-    assert "se esperaban al menos 2" in payload["warning"]
+    assert payload["warning"] == "La alerta indica países AW|BO, pero no se encontró transacción hija para AW."
+
+
+def test_summary_transactions_uses_child_transaction_ids_when_present(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    summary_alert_id = _write_summary_transactions_rule_files(processed_dir, customer_hash, include_child_ids=True)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["transaction_id"] for item in payload["items"]] == ["tx-001", "tx-002", "tx-003"]
+    assert payload["warning"] is None
 
 
 def test_summary_transactions_respects_run_id_and_returns_empty_when_no_detail(monkeypatch, test_client, tmp_path):
