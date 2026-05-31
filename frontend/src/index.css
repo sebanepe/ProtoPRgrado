@@ -478,6 +478,23 @@ button, input, select, textarea {
 	white-space: normal;
 }
 
+.dashboard-chart-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+	gap: 16px;
+	margin-top: 16px;
+}
+
+.dashboard-alerts-table {
+	min-width: 980px;
+}
+
+@media (max-width: 900px) {
+	.dashboard-chart-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
 .table-card {
 	padding: 0;
 	overflow: hidden;
