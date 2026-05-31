@@ -52,7 +52,7 @@ export default function Login({ checking = false }){
     <div className="login-shell">
       <div className="login-hero">
         <div className="login-hero-panel">
-          <h1>Sistema de Detección de Fraude</h1>
+          <h1>Sistema de Detección y monitoreo de Fraude</h1>
           <p>Plataforma de detección y análisis de fraude — accede para revisar alertas y operar modelos.</p>
         </div>
       </div>

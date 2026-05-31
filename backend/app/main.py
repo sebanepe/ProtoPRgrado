@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes, feature_set_routes, system_log_routes, rule_routes, anomaly_routes, supervised_routes, artifact_routes
+from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes, feature_set_routes, system_log_routes, rule_routes, anomaly_routes, supervised_routes, artifact_routes, autoencoder_anomaly_routes
 from .config import settings
 from .init_db import ensure_traceability_tables, ensure_transactions_merchant_rubro_column
 
@@ -43,6 +43,7 @@ app.include_router(feature_set_routes.router)
 app.include_router(system_log_routes.router)
 app.include_router(rule_routes.router)
 app.include_router(anomaly_routes.router)
+app.include_router(autoencoder_anomaly_routes.router)
 app.include_router(supervised_routes.router)
 app.include_router(artifact_routes.router)
 

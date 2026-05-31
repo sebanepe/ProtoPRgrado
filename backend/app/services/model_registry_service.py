@@ -121,3 +121,52 @@ def register_unsupervised_model_from_artifacts(db: Session, source_run: str) -> 
     db.commit()
     db.refresh(existing)
     return existing
+
+
+def register_autoencoder_model(
+    db: Session,
+    *,
+    source_run: str,
+    model_file: str,
+    metadata_file: str,
+    scores_file: str,
+    feature_file: str,
+    report_file: str,
+    metrics: dict[str, Any],
+) -> ModelRegistry:
+    normalized = artifacts.normalize_source_run(source_run)
+    run_token = artifacts.normalize_run_token(normalized)
+    existing = (
+        db.query(ModelRegistry)
+        .filter(
+            ModelRegistry.model_family == "UNSUPERVISED",
+            ModelRegistry.algorithm == "autoencoder_pytorch",
+            ModelRegistry.source_run == normalized,
+        )
+        .first()
+    )
+    payload = {
+        "run_token": run_token,
+        "model_file": model_file,
+        "metadata_file": metadata_file,
+        "report_file": report_file,
+        "scores_file": scores_file,
+        "feature_file": feature_file,
+        "metrics_json": json.dumps(metrics, ensure_ascii=True, sort_keys=True),
+        "status": "AVAILABLE",
+        "is_active": False,
+    }
+    if existing is None:
+        existing = ModelRegistry(
+            model_family="UNSUPERVISED",
+            algorithm="autoencoder_pytorch",
+            source_run=normalized,
+            **payload,
+        )
+        db.add(existing)
+    else:
+        for key, value in payload.items():
+            setattr(existing, key, value)
+    db.commit()
+    db.refresh(existing)
+    return existing
