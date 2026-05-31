@@ -251,4 +251,24 @@ export async function trainAnomalyModel(payload = {}){
   return api.post('/api/anomaly/train', null, { params }).then(r => r.data)
 }
 
+export async function trainAutoencoderAnomaly(params = {}){
+  return api.post('/api/anomaly/autoencoder/train', params).then(r => r.data)
+}
+
+export async function getAutoencoderMetrics(sourceRun){
+  return api.get('/api/anomaly/autoencoder/metrics', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
+export async function getAutoencoderScores(sourceRun, params = {}){
+  return api.get('/api/anomaly/autoencoder/scores', { params: { source_run: sourceRun, ...params } }).then(r => r.data)
+}
+
+export async function getAutoencoderReport(sourceRun){
+  return api.get('/api/anomaly/autoencoder/report', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
+export async function getAutoencoderModelMetadata(sourceRun){
+  return api.get('/api/anomaly/autoencoder/model-metadata', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
 export default api

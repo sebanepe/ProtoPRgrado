@@ -54,6 +54,34 @@ FORBIDDEN_COLUMNS = {
     "response_description",
 }
 
+FORBIDDEN_OUTPUT_COLUMNS = {
+    "is_fraud",
+    "confirmed_fraud",
+    "target_is_fraud",
+    "analyst_label",
+    "human_label",
+    "review_status",
+    "reviewed_by",
+    "reviewed_at",
+    "rule_code",
+    "rule_name",
+    "alert_reason",
+    "risk_score",
+    "behavioral_risk_score",
+    "anomaly_flag",
+    "anomaly_score",
+    "anomaly_percentile",
+    "anomaly_model_name",
+    "pan_tarjeta",
+    "tarjeta",
+    "pan_card",
+    "raw_card",
+    "masked_card",
+    "authorization_code",
+    "reference_number",
+    "response_description",
+}
+
 CONTEXT_COLUMNS = {
     "source_run",
     "transaction_id",
@@ -346,7 +374,7 @@ def save_autoencoder_artifacts(
     metadata_file = models_directory / f"autoencoder_model_run_{run_token}_metadata.json"
 
     score_frame = trained["score_frame"].copy()
-    for forbidden in FORBIDDEN_COLUMNS:
+    for forbidden in FORBIDDEN_OUTPUT_COLUMNS:
         score_frame = score_frame.drop(columns=[forbidden], errors="ignore")
     score_frame.to_csv(score_file, index=False)
 

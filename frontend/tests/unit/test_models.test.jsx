@@ -11,6 +11,11 @@ vi.mock('../../src/services/api', () => ({
   getAnomalyReport: vi.fn(),
   getAnomalyModelMetadata: vi.fn(),
   trainAnomalyModel: vi.fn(),
+  getAutoencoderMetrics: vi.fn(),
+  getAutoencoderScores: vi.fn(),
+  getAutoencoderReport: vi.fn(),
+  getAutoencoderModelMetadata: vi.fn(),
+  trainAutoencoderAnomaly: vi.fn(),
 }))
 import {
   getAnomalyRuns,
@@ -62,7 +67,7 @@ describe('Models page', () => {
   it('loads the unsupervised anomaly dashboard', async () => {
     render(<Models />)
     await waitFor(() => expect(getAnomalyRuns).toHaveBeenCalled())
-    expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0)
-    expect(screen.getByText('Las anomalías detectadas por el modelo no supervisado no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
+    expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getByText('Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
   })
 })

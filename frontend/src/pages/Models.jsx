@@ -2,12 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react'
 import KPICard from '../components/KPICard'
 import Table from '../components/Table'
 import {
+  getAutoencoderMetrics,
+  getAutoencoderModelMetadata,
+  getAutoencoderReport,
+  getAutoencoderScores,
   getAnomalyMetrics,
   getAnomalyModelMetadata,
   getAnomalyReport,
   getAnomalyRuns,
   getAnomalyScores,
   getTopAnomalies,
+  trainAutoencoderAnomaly,
   trainAnomalyModel,
 } from '../services/api'
 
@@ -16,6 +21,10 @@ const DEFAULT_TRAINING_FORM = {
   contamination: '0.01',
   n_estimators: '200',
   max_categories: '50',
+  epochs: '30',
+  batch_size: '512',
+  latent_dim: '16',
+  learning_rate: '0.001',
   sample_size: '',
 }
 
@@ -29,12 +38,22 @@ const DEFAULT_FILTERS = {
   max_score: '',
 }
 
+const FORBIDDEN_DISPLAY_TOKENS = ['is_fraud', 'confirmed_fraud', 'PAN_TARJETA', 'TARJETA', 'pan_card', 'raw_card']
+
 function extractErrorMessage(error, fallback) {
   return error?.response?.data?.detail || error?.message || fallback
 }
 
 function compactObject(values) {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined))
+}
+
+function sanitizeDisplayValue(value) {
+  if (Array.isArray(value)) {
+    return value.filter((item) => !FORBIDDEN_DISPLAY_TOKENS.includes(String(item)))
+  }
+  if (typeof value !== 'string') return value
+  return FORBIDDEN_DISPLAY_TOKENS.reduce((text, token) => text.replaceAll(token, '[columna protegida]'), value)
 }
 
 function formatNumber(value, decimals = 0) {
@@ -58,6 +77,13 @@ function formatMaybeDate(value) {
     return parsed.toLocaleString('es-ES')
   }
   return String(value)
+}
+
+function dependencyMessage(status) {
+  if (status === 'AUTOENCODER_DEPENDENCY_NOT_AVAILABLE') {
+    return 'PyTorch no está disponible en el entorno actual. Instale o habilite PyTorch para entrenar el Autoencoder.'
+  }
+  return ''
 }
 
 function topEntry(source) {
@@ -114,6 +140,7 @@ function KeyValueGrid({ title, items }) {
 }
 
 export default function Models() {
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('isolation_forest')
   const [runs, setRuns] = useState([])
   const [selectedRunId, setSelectedRunId] = useState('')
   const [runsLoading, setRunsLoading] = useState(true)
@@ -152,10 +179,13 @@ export default function Models() {
   const [copyState, setCopyState] = useState('')
 
   const selectedRun = useMemo(() => runs.find((run) => run.anomaly_run_id === selectedRunId) || null, [runs, selectedRunId])
+  const selectedSourceRun = trainingForm.source_run.trim() || selectedRun?.source_run || 'preprocessed_run_26'
+  const isAutoencoder = selectedAlgorithm === 'autoencoder_pytorch'
 
   const normalizedScoreFilters = useMemo(() => {
     const params = {}
     if (appliedFilters.anomaly_flag) params.anomaly_flag = 1
+    if (isAutoencoder) return params
     if (appliedFilters.country_code.trim()) params.country_code = appliedFilters.country_code.trim()
     if (appliedFilters.pos_entry_mode.trim()) params.pos_entry_mode = appliedFilters.pos_entry_mode.trim()
     if (appliedFilters.merchant_rubro_proxy.trim()) params.merchant_rubro_proxy = appliedFilters.merchant_rubro_proxy.trim()
@@ -163,7 +193,7 @@ export default function Models() {
     if (appliedFilters.min_score.trim() !== '') params.min_score = Number(appliedFilters.min_score)
     if (appliedFilters.max_score.trim() !== '') params.max_score = Number(appliedFilters.max_score)
     return params
-  }, [appliedFilters])
+  }, [appliedFilters, isAutoencoder])
 
   async function loadRuns(preferredRunId = '') {
     setRunsLoading(true)
@@ -187,12 +217,14 @@ export default function Models() {
     }
   }
 
-  async function loadMetrics(runId) {
+  async function loadMetrics(runId, algorithm = selectedAlgorithm) {
     if (!runId) return
     setMetricsLoading(true)
     setMetricsError('')
     try {
-      const response = await getAnomalyMetrics(runId)
+      const response = algorithm === 'autoencoder_pytorch'
+        ? await getAutoencoderMetrics(runId)
+        : await getAnomalyMetrics(runId)
       setMetrics(response)
     } catch (error) {
       setMetrics(null)
@@ -202,12 +234,14 @@ export default function Models() {
     }
   }
 
-  async function loadScores(runId, currentPage = page, currentPageSize = pageSize, filters = normalizedScoreFilters) {
+  async function loadScores(runId, currentPage = page, currentPageSize = pageSize, filters = normalizedScoreFilters, algorithm = selectedAlgorithm) {
     if (!runId) return
     setScoresLoading(true)
     setScoresError('')
     try {
-      const response = await getAnomalyScores(runId, { page: currentPage, page_size: currentPageSize, ...filters })
+      const response = algorithm === 'autoencoder_pytorch'
+        ? await getAutoencoderScores(runId, { page: currentPage, page_size: currentPageSize, ...filters })
+        : await getAnomalyScores(runId, { page: currentPage, page_size: currentPageSize, ...filters })
       setScoresPayload(response)
     } catch (error) {
       setScoresPayload({ run_id: runId, page: currentPage, page_size: currentPageSize, total_items: 0, total_pages: 0, items: [] })
@@ -217,8 +251,13 @@ export default function Models() {
     }
   }
 
-  async function loadTop(runId) {
+  async function loadTop(runId, algorithm = selectedAlgorithm) {
     if (!runId) return
+    if (algorithm === 'autoencoder_pytorch') {
+      setTopAnomalies([])
+      setTopError('')
+      return
+    }
     setTopLoading(true)
     setTopError('')
     try {
@@ -232,12 +271,14 @@ export default function Models() {
     }
   }
 
-  async function loadReport(runId) {
+  async function loadReport(runId, algorithm = selectedAlgorithm) {
     if (!runId) return
     setReportLoading(true)
     setReportError('')
     try {
-      const response = await getAnomalyReport(runId)
+      const response = algorithm === 'autoencoder_pytorch'
+        ? await getAutoencoderReport(runId)
+        : await getAnomalyReport(runId)
       setReport(response?.report || '')
     } catch (error) {
       setReport('')
@@ -247,12 +288,14 @@ export default function Models() {
     }
   }
 
-  async function loadMetadata(runId) {
+  async function loadMetadata(runId, algorithm = selectedAlgorithm) {
     if (!runId) return
     setMetadataLoading(true)
     setMetadataError('')
     try {
-      const response = await getAnomalyModelMetadata(runId)
+      const response = algorithm === 'autoencoder_pytorch'
+        ? await getAutoencoderModelMetadata(runId)
+        : await getAnomalyModelMetadata(runId)
       setMetadata(response?.metadata || null)
     } catch (error) {
       setMetadata(null)
@@ -267,17 +310,19 @@ export default function Models() {
   }, [])
 
   useEffect(() => {
-    if (!selectedRunId) return
-    loadMetrics(selectedRunId)
-    loadTop(selectedRunId)
-    loadReport(selectedRunId)
-    loadMetadata(selectedRunId)
-  }, [selectedRunId])
+    const lookupRun = isAutoencoder ? selectedSourceRun : selectedRunId
+    if (!lookupRun) return
+    loadMetrics(lookupRun, selectedAlgorithm)
+    loadTop(lookupRun, selectedAlgorithm)
+    loadReport(lookupRun, selectedAlgorithm)
+    loadMetadata(lookupRun, selectedAlgorithm)
+  }, [selectedRunId, selectedAlgorithm, selectedSourceRun])
 
   useEffect(() => {
-    if (!selectedRunId) return
-    loadScores(selectedRunId, page, pageSize, normalizedScoreFilters)
-  }, [selectedRunId, page, pageSize, normalizedScoreFilters])
+    const lookupRun = isAutoencoder ? selectedSourceRun : selectedRunId
+    if (!lookupRun) return
+    loadScores(lookupRun, page, pageSize, normalizedScoreFilters, selectedAlgorithm)
+  }, [selectedRunId, selectedAlgorithm, selectedSourceRun, page, pageSize, normalizedScoreFilters])
 
   const anomalyColumns = [
     { key: 'anomaly_rank', title: 'anomaly_rank' },
@@ -295,6 +340,25 @@ export default function Models() {
     { key: 'anomaly_model_name', title: 'anomaly_model_name' },
     { key: '__actions', title: 'Acción' },
   ]
+
+  const autoencoderColumns = [
+    { key: 'anomaly_rank', title: 'anomaly_rank' },
+    { key: 'transaction_id', title: 'transaction_id' },
+    { key: 'customer_hash', title: 'customer_hash' },
+    { key: 'transaction_datetime', title: 'transaction_datetime' },
+    { key: 'amount', title: 'amount' },
+    { key: 'country_code', title: 'country_code' },
+    { key: 'pos_entry_mode', title: 'pos_entry_mode' },
+    { key: 'has_pinblock', title: 'has_pinblock' },
+    { key: 'merchant_rubro_proxy', title: 'merchant_rubro_proxy' },
+    { key: 'anomaly_score', title: 'reconstruction_error' },
+    { key: 'anomaly_percentile', title: 'autoencoder_anomaly_score' },
+    { key: 'anomaly_flag', title: 'autoencoder_anomaly_flag' },
+    { key: 'anomaly_model_name', title: 'algorithm' },
+    { key: '__actions', title: 'Accion' },
+  ]
+
+  const activeScoreColumns = isAutoencoder ? autoencoderColumns : anomalyColumns
 
   const topColumns = [
     { key: 'anomaly_rank', title: 'Rank' },
@@ -314,7 +378,20 @@ export default function Models() {
     anomaly_score: item.anomaly_score !== null && item.anomaly_score !== undefined ? Number(item.anomaly_score).toFixed(6) : 'N/A',
     anomaly_percentile: item.anomaly_percentile !== null && item.anomaly_percentile !== undefined ? Number(item.anomaly_percentile).toFixed(2) : 'N/A',
     anomaly_flag: Number(item.anomaly_flag) === 1 ? '1' : '0',
-  })), [scoresPayload.items])
+    reconstruction_error: item.reconstruction_error !== null && item.reconstruction_error !== undefined ? Number(item.reconstruction_error).toFixed(6) : 'N/A',
+    autoencoder_anomaly_score: item.autoencoder_anomaly_score !== null && item.autoencoder_anomaly_score !== undefined ? Number(item.autoencoder_anomaly_score).toFixed(6) : 'N/A',
+    autoencoder_anomaly_flag: Number(item.autoencoder_anomaly_flag) === 1 ? '1' : '0',
+    ...(isAutoencoder ? {
+      pos_entry_mode: item.pos_entry_mode || 'N/A',
+      has_pinblock: item.has_pinblock ?? 'N/A',
+      anomaly_score: item.reconstruction_error !== null && item.reconstruction_error !== undefined ? Number(item.reconstruction_error).toFixed(6) : 'N/A',
+      anomaly_percentile: item.autoencoder_anomaly_score !== null && item.autoencoder_anomaly_score !== undefined ? Number(item.autoencoder_anomaly_score).toFixed(6) : 'N/A',
+      anomaly_flag: Number(item.autoencoder_anomaly_flag) === 1 ? '1' : '0',
+      anomaly_model_name: 'autoencoder_pytorch',
+    } : {}),
+  })), [scoresPayload.items, isAutoencoder])
+
+  const safeReport = useMemo(() => sanitizeDisplayValue(report || ''), [report])
 
   const topRows = useMemo(() => topAnomalies.map((item) => ({
     ...item,
@@ -324,6 +401,21 @@ export default function Models() {
   })), [topAnomalies])
 
   const metricHighlights = useMemo(() => {
+    if (isAutoencoder) {
+      return [
+        { label: 'Total de registros', value: formatNumber(metrics?.total_records ?? metrics?.total_transactions) },
+        { label: 'Total de anomalÃ­as', value: formatNumber(metrics?.anomaly_count) },
+        { label: 'Porcentaje de anomalÃ­as', value: formatPercent(metrics?.anomaly_rate), highlight: true },
+        { label: 'Contamination', value: metrics?.contamination ?? 'N/A' },
+        { label: 'Threshold de reconstrucciÃ³n', value: metrics?.threshold !== undefined && metrics?.threshold !== null ? Number(metrics.threshold).toFixed(6) : 'N/A' },
+        { label: 'Algoritmo', value: 'Autoencoder PyTorch' },
+        { label: 'Run', value: metrics?.source_run || selectedSourceRun || 'N/A' },
+        { label: 'epochs', value: metadata?.epochs ?? 'N/A' },
+        { label: 'batch_size', value: metadata?.batch_size ?? 'N/A' },
+        { label: 'latent_dim', value: metadata?.latent_dim ?? 'N/A' },
+        { label: 'learning_rate', value: metadata?.learning_rate ?? 'N/A' },
+      ]
+    }
     const countryTop = topEntry(metrics?.anomalies_by_country)
     const mccTop = topEntry(metrics?.anomalies_by_mcc)
     const posTop = topEntry(metrics?.anomalies_by_pos_entry_mode)
@@ -338,10 +430,30 @@ export default function Models() {
       { label: 'MCC con más anomalías', value: mccTop ? `${mccTop[0]} (${mccTop[1]})` : 'N/A' },
       { label: 'POS Entry Mode más frecuente', value: posTop ? `${posTop[0]} (${posTop[1]})` : 'N/A' },
     ]
-  }, [metrics])
+  }, [metrics, metadata, isAutoencoder, selectedSourceRun])
 
   const metadataItems = useMemo(() => {
     if (!metadata) return []
+    if (isAutoencoder) {
+      return [
+        { label: 'model_family', value: metadata.model_family || 'UNSUPERVISED' },
+        { label: 'algorithm', value: metadata.algorithm || 'autoencoder_pytorch' },
+        { label: 'framework', value: metadata.framework || 'pytorch' },
+        { label: 'contamination', value: metadata.contamination ?? 'N/A' },
+        { label: 'threshold', value: metadata.threshold !== undefined ? Number(metadata.threshold).toFixed(6) : 'N/A' },
+        { label: 'total_records', value: formatNumber(metadata.total_records) },
+        { label: 'anomaly_count', value: formatNumber(metadata.anomaly_count) },
+        { label: 'anomaly_rate', value: metadata.anomaly_rate !== undefined ? `${(Number(metadata.anomaly_rate) * 100).toFixed(2)}%` : 'N/A' },
+        { label: 'epochs', value: metadata.epochs ?? 'N/A' },
+        { label: 'batch_size', value: metadata.batch_size ?? 'N/A' },
+        { label: 'latent_dim', value: metadata.latent_dim ?? 'N/A' },
+        { label: 'learning_rate', value: metadata.learning_rate ?? 'N/A' },
+        { label: 'model_file', value: metadata.model_file || 'N/A' },
+        { label: 'scores_file', value: metadata.scores_file || 'N/A' },
+        { label: 'feature_file', value: metadata.feature_file || 'N/A' },
+        { label: 'report_file', value: metadata.report_file || 'N/A' },
+      ]
+    }
     return [
       { label: 'model_name', value: metadata.model_name || 'N/A' },
       { label: 'model_type', value: metadata.model_type || 'N/A' },
@@ -355,9 +467,20 @@ export default function Models() {
       { label: 'feature_file', value: metadata.feature_file || 'N/A' },
       { label: 'report_file', value: metadata.report_file || 'N/A' },
     ]
-  }, [metadata])
+  }, [metadata, isAutoencoder])
 
-  const detailItems = selectedAnomaly ? [
+  const detailItems = selectedAnomaly && isAutoencoder ? [
+    ['transaction_id', selectedAnomaly.transaction_id || 'N/A'],
+    ['customer_hash', selectedAnomaly.customer_hash || 'N/A'],
+    ['transaction_datetime', formatMaybeDate(selectedAnomaly.transaction_datetime)],
+    ['amount', formatNumber(selectedAnomaly.amount, 2)],
+    ['country_code', selectedAnomaly.country_code || 'N/A'],
+    ['merchant_rubro_proxy', selectedAnomaly.merchant_rubro_proxy || 'N/A'],
+    ['reconstruction_error', selectedAnomaly.reconstruction_error !== undefined ? Number(selectedAnomaly.reconstruction_error).toFixed(6) : 'N/A'],
+    ['autoencoder_anomaly_score', selectedAnomaly.autoencoder_anomaly_score !== undefined ? Number(selectedAnomaly.autoencoder_anomaly_score).toFixed(6) : 'N/A'],
+    ['autoencoder_anomaly_flag', Number(selectedAnomaly.autoencoder_anomaly_flag) === 1 ? '1' : '0'],
+    ['anomaly_rank', selectedAnomaly.anomaly_rank ?? 'N/A'],
+  ] : selectedAnomaly ? [
     ['transaction_id', selectedAnomaly.transaction_id || 'N/A'],
     ['customer_hash', selectedAnomaly.customer_hash || 'N/A'],
     ['transaction_datetime', formatMaybeDate(selectedAnomaly.transaction_datetime)],
@@ -375,10 +498,10 @@ export default function Models() {
   ] : []
 
   async function handleCopyReport() {
-    if (!report) return
+    if (!safeReport) return
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(report)
+        await navigator.clipboard.writeText(safeReport)
       }
       setCopyState('Reporte copiado al portapapeles.')
     } catch (error) {
@@ -397,30 +520,45 @@ export default function Models() {
   async function handleTrainModel(event) {
     event.preventDefault()
     setTrainingRunning(true)
-    setTrainingMessage('')
+    setTrainingMessage('Entrenando modelo no supervisado. Este proceso puede tardar varios minutos.')
     setTrainingError('')
     try {
-      const payload = {
-        source_run: trainingForm.source_run.trim(),
-        contamination: trainingForm.contamination,
-        n_estimators: trainingForm.n_estimators,
-        max_categories: trainingForm.max_categories,
-        sample_size: trainingForm.sample_size.trim(),
+      const payload = isAutoencoder
+        ? {
+            source_run: trainingForm.source_run.trim(),
+            contamination: Number(trainingForm.contamination),
+            epochs: Number(trainingForm.epochs),
+            batch_size: Number(trainingForm.batch_size),
+            latent_dim: Number(trainingForm.latent_dim),
+            learning_rate: Number(trainingForm.learning_rate),
+            sample_size: trainingForm.sample_size.trim() ? Number(trainingForm.sample_size) : null,
+          }
+        : {
+            source_run: trainingForm.source_run.trim(),
+            contamination: trainingForm.contamination,
+            n_estimators: trainingForm.n_estimators,
+            max_categories: trainingForm.max_categories,
+            sample_size: trainingForm.sample_size.trim(),
+          }
+      const response = isAutoencoder ? await trainAutoencoderAnomaly(payload) : await trainAnomalyModel(payload)
+      const dependencyError = dependencyMessage(response?.status)
+      if (dependencyError) {
+        setTrainingError(dependencyError)
+        return
       }
-      const response = await trainAnomalyModel(payload)
-      setTrainingMessage(`Entrenamiento completado: ${response?.anomaly_run_id || response?.source_run || 'modelo actualizado'}.`)
-      const nextRunId = response?.anomaly_run_id || ''
-      const resolvedRunId = await loadRuns(nextRunId)
-      const finalRunId = resolvedRunId || nextRunId || selectedRunId
+      setTrainingMessage(`Entrenamiento completado: ${response?.algorithm || selectedAlgorithm} - ${response?.anomaly_run_id || response?.source_run || 'modelo actualizado'}.`)
+      const nextRunId = isAutoencoder ? (response?.source_run || payload.source_run) : (response?.anomaly_run_id || '')
+      const resolvedRunId = isAutoencoder ? nextRunId : await loadRuns(nextRunId)
+      const finalRunId = resolvedRunId || nextRunId || (isAutoencoder ? selectedSourceRun : selectedRunId)
       if (finalRunId) {
-        setSelectedRunId(finalRunId)
+        if (!isAutoencoder) setSelectedRunId(finalRunId)
         setPage(1)
         await Promise.all([
-          loadMetrics(finalRunId),
-          loadTop(finalRunId),
-          loadReport(finalRunId),
-          loadMetadata(finalRunId),
-          loadScores(finalRunId, 1, pageSize, normalizedScoreFilters),
+          loadMetrics(finalRunId, selectedAlgorithm),
+          loadTop(finalRunId, selectedAlgorithm),
+          loadReport(finalRunId, selectedAlgorithm),
+          loadMetadata(finalRunId, selectedAlgorithm),
+          loadScores(finalRunId, 1, pageSize, normalizedScoreFilters, selectedAlgorithm),
         ])
       }
     } catch (error) {
@@ -460,8 +598,8 @@ export default function Models() {
     <div className="models-page">
       <div className="header">
         <div>
-          <h2>Modelos No Supervisados</h2>
-          <div className="page-subtitle">Detección de anomalías transaccionales mediante Isolation Forest.</div>
+          <h2>No Supervisados</h2>
+          <div className="page-subtitle">Entrenamiento y consulta de modelos no supervisados para detección de anomalías.</div>
         </div>
         <div className="header-actions">
           <span className="warning-badge">Las anomalías no representan fraude confirmado</span>
@@ -469,7 +607,7 @@ export default function Models() {
       </div>
 
       <div className="card warning-banner">
-        Las anomalías detectadas por el modelo no supervisado no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.
+        Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.
       </div>
 
       <div className="card detail-section">
@@ -478,6 +616,22 @@ export default function Models() {
         <form onSubmit={handleTrainModel}>
           <div className="filters-grid training-grid">
             <div className="form-row">
+              <label htmlFor="selected_algorithm">Modelo no supervisado</label>
+              <select
+                id="selected_algorithm"
+                className="input"
+                value={selectedAlgorithm}
+                onChange={(e) => {
+                  setSelectedAlgorithm(e.target.value)
+                  setPage(1)
+                  setSelectedAnomaly(null)
+                }}
+              >
+                <option value="isolation_forest">Isolation Forest</option>
+                <option value="autoencoder_pytorch">Autoencoder PyTorch</option>
+              </select>
+            </div>
+            <div className="form-row">
               <label htmlFor="source_run">source_run</label>
               <input id="source_run" className="input" value={trainingForm.source_run} onChange={(e) => updateTrainingField('source_run', e.target.value)} />
             </div>
@@ -485,14 +639,38 @@ export default function Models() {
               <label htmlFor="contamination">contamination</label>
               <input id="contamination" className="input" type="number" step="0.001" min="0.001" max="0.5" value={trainingForm.contamination} onChange={(e) => updateTrainingField('contamination', e.target.value)} />
             </div>
-            <div className="form-row">
-              <label htmlFor="n_estimators">n_estimators</label>
-              <input id="n_estimators" className="input" type="number" min="1" value={trainingForm.n_estimators} onChange={(e) => updateTrainingField('n_estimators', e.target.value)} />
-            </div>
-            <div className="form-row">
-              <label htmlFor="max_categories">max_categories</label>
-              <input id="max_categories" className="input" type="number" min="1" value={trainingForm.max_categories} onChange={(e) => updateTrainingField('max_categories', e.target.value)} />
-            </div>
+            {!isAutoencoder && (
+              <>
+                <div className="form-row">
+                  <label htmlFor="n_estimators">n_estimators</label>
+                  <input id="n_estimators" className="input" type="number" min="1" value={trainingForm.n_estimators} onChange={(e) => updateTrainingField('n_estimators', e.target.value)} />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="max_categories">max_categories</label>
+                  <input id="max_categories" className="input" type="number" min="1" value={trainingForm.max_categories} onChange={(e) => updateTrainingField('max_categories', e.target.value)} />
+                </div>
+              </>
+            )}
+            {isAutoencoder && (
+              <>
+                <div className="form-row">
+                  <label htmlFor="epochs">epochs</label>
+                  <input id="epochs" className="input" type="number" min="1" value={trainingForm.epochs} onChange={(e) => updateTrainingField('epochs', e.target.value)} />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="batch_size">batch_size</label>
+                  <input id="batch_size" className="input" type="number" min="1" value={trainingForm.batch_size} onChange={(e) => updateTrainingField('batch_size', e.target.value)} />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="latent_dim">latent_dim</label>
+                  <input id="latent_dim" className="input" type="number" min="1" value={trainingForm.latent_dim} onChange={(e) => updateTrainingField('latent_dim', e.target.value)} />
+                </div>
+                <div className="form-row">
+                  <label htmlFor="learning_rate">learning_rate</label>
+                  <input id="learning_rate" className="input" type="number" min="0.000001" step="0.000001" value={trainingForm.learning_rate} onChange={(e) => updateTrainingField('learning_rate', e.target.value)} />
+                </div>
+              </>
+            )}
             <div className="form-row">
               <label htmlFor="sample_size">sample_size (opcional)</label>
               <input id="sample_size" className="input" type="number" min="1" placeholder="Vacío para no limitar" value={trainingForm.sample_size} onChange={(e) => updateTrainingField('sample_size', e.target.value)} />
@@ -514,7 +692,11 @@ export default function Models() {
       <div className="card detail-section">
         <h3>Selector de ejecuciones no supervisadas</h3>
         <p className="section-help">Seleccione una ejecución para ver métricas, anomalías, reporte y metadata.</p>
-        {runsLoading ? (
+        {isAutoencoder ? (
+          <div className="status-banner status-info">
+            Autoencoder PyTorch consulta resultados separados usando source_run: {selectedSourceRun}. Los resultados no representan fraude confirmado.
+          </div>
+        ) : runsLoading ? (
           <div className="empty-state">Cargando ejecuciones...</div>
         ) : runsError ? (
           <div className="status-banner status-error">{runsError}</div>
@@ -571,8 +753,9 @@ export default function Models() {
 
       <div className="card detail-section">
         <h3>Distribuciones</h3>
+        {isAutoencoder && <div className="empty-state">Autoencoder muestra métricas, scores, reporte y metadata propios separados de Isolation Forest.</div>}
         {metricsLoading && <div className="empty-state">Cargando distribuciones...</div>}
-        {!metricsLoading && metrics && (
+        {!isAutoencoder && !metricsLoading && metrics && (
           <div className="distribution-grid">
             <InfoList title="Anomalías por país" items={renderDistributionItems(metrics.anomalies_by_country)} />
             <InfoList title="Anomalías por POS Entry Mode" items={renderDistributionItems(metrics.anomalies_by_pos_entry_mode)} />
@@ -646,7 +829,7 @@ export default function Models() {
               <table className="table anomaly-table">
                 <thead>
                   <tr>
-                    {anomalyColumns.map((column) => (
+                    {activeScoreColumns.map((column) => (
                       <th key={column.key}>{column.title}</th>
                     ))}
                   </tr>
@@ -693,7 +876,9 @@ export default function Models() {
       <div className="card detail-section">
         <h3>Top 20 anomalías detectadas</h3>
         <p className="section-help">Ranking de anomalías estadísticas, no de fraude confirmado.</p>
-        {topLoading ? (
+        {isAutoencoder ? (
+          <div className="empty-state">Use la tabla paginada de Autoencoder ordenada por anomaly_rank para revisar los mayores errores de reconstrucción.</div>
+        ) : topLoading ? (
           <div className="empty-state">Cargando top anomalías...</div>
         ) : topError ? (
           <div className="status-banner status-error">{topError}</div>
@@ -714,8 +899,8 @@ export default function Models() {
           <div className="empty-state">Cargando reporte...</div>
         ) : reportError ? (
           <div className="status-banner status-error">{reportError}</div>
-        ) : report ? (
-          <pre className="report-pre report-box">{report}</pre>
+        ) : safeReport ? (
+          <pre className="report-pre report-box">{safeReport}</pre>
         ) : (
           <div className="empty-state">No hay reporte disponible para la ejecución seleccionada.</div>
         )}
@@ -734,10 +919,10 @@ export default function Models() {
               ['numeric_features', (metadata.numeric_features || []).join(', ') || 'N/A'],
               ['categorical_features', (metadata.categorical_features || []).join(', ') || 'N/A'],
               ['model_input_columns', (metadata.model_input_columns || []).join(', ') || 'N/A'],
-              ['excluded_columns', (metadata.excluded_columns || []).join(', ') || 'N/A'],
+              ['excluded_columns', sanitizeDisplayValue(metadata.excluded_columns || []).join(', ') || 'N/A'],
             ]} />
             <div className="status-banner status-info">
-              customer_hash se conserva como contexto, no como predictor directo. No se usaron is_fraud ni confirmed_fraud. No se usaron reglas como etiquetas.
+              customer_hash se conserva como contexto, no como predictor directo. No se usaron etiquetas de fraude confirmado ni reglas como etiquetas.
             </div>
           </>
         ) : (

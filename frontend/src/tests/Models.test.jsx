@@ -172,6 +172,68 @@ const metadata = {
   },
 }
 
+const autoencoderMetrics = {
+  source_run: 'preprocessed_run_26',
+  algorithm: 'autoencoder_pytorch',
+  total_records: 100,
+  anomaly_count: 1,
+  anomaly_rate: 0.01,
+  threshold: 0.123456,
+  contamination: 0.01,
+  created_at: '2026-05-31T00:00:00Z',
+}
+
+const autoencoderScores = {
+  source_run: 'preprocessed_run_26',
+  page: 1,
+  page_size: 50,
+  total_items: 1,
+  total_pages: 1,
+  items: [
+    {
+      source_run: 'preprocessed_run_26',
+      transaction_id: 'tx_ae_1',
+      customer_hash: 'cust_ae_1',
+      transaction_datetime: '2026-05-31T10:00:00Z',
+      amount: 500,
+      country_code: 'BO',
+      merchant_rubro_proxy: '6011',
+      reconstruction_error: 0.9,
+      autoencoder_anomaly_score: 1,
+      autoencoder_anomaly_flag: 1,
+      anomaly_rank: 1,
+    },
+  ],
+}
+
+const autoencoderReport = {
+  source_run: 'preprocessed_run_26',
+  report: '# Autoencoder PyTorch Report\nLos resultados no representan fraude confirmado.',
+}
+
+const autoencoderMetadata = {
+  source_run: 'preprocessed_run_26',
+  metadata: {
+    source_run: 'preprocessed_run_26',
+    model_family: 'UNSUPERVISED',
+    algorithm: 'autoencoder_pytorch',
+    framework: 'pytorch',
+    epochs: 30,
+    batch_size: 512,
+    latent_dim: 16,
+    learning_rate: 0.001,
+    contamination: 0.01,
+    threshold: 0.123456,
+    total_records: 100,
+    anomaly_count: 1,
+    anomaly_rate: 0.01,
+    feature_columns: ['amount_log', 'hour_of_day'],
+    scores_file: 'autoencoder_scores_run_26.csv',
+    report_file: 'autoencoder_report_run_26.md',
+    model_file: 'autoencoder_model_run_26.pt',
+  },
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.setItem('user', JSON.stringify({ id: 1, email: 'user@example.com', token: 'token' }))
@@ -189,6 +251,11 @@ beforeEach(() => {
   api.getAnomalyReport.mockResolvedValue(report)
   api.getAnomalyModelMetadata.mockResolvedValue(metadata)
   api.trainAnomalyModel.mockResolvedValue({ status: 'COMPLETED', anomaly_run_id: 'run_26', source_run: 'preprocessed_run_26' })
+  api.getAutoencoderMetrics.mockResolvedValue(autoencoderMetrics)
+  api.getAutoencoderScores.mockResolvedValue(autoencoderScores)
+  api.getAutoencoderReport.mockResolvedValue(autoencoderReport)
+  api.getAutoencoderModelMetadata.mockResolvedValue(autoencoderMetadata)
+  api.trainAutoencoderAnomaly.mockResolvedValue({ status: 'COMPLETED', algorithm: 'autoencoder_pytorch', source_run: 'preprocessed_run_26' })
 })
 
 afterEach(() => {
@@ -196,6 +263,73 @@ afterEach(() => {
 })
 
 describe('Models page', () => {
+  it('renders unsupervised screen with Isolation Forest selected by default', async () => {
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+    expect(screen.getByText('No Supervisados')).toBeTruthy()
+    expect(screen.getByLabelText('Modelo no supervisado').value).toBe('isolation_forest')
+    expect(screen.getByLabelText('n_estimators')).toBeTruthy()
+    expect(screen.getByLabelText('max_categories')).toBeTruthy()
+    expect(screen.queryByLabelText('epochs')).toBeNull()
+    expect(screen.queryByLabelText('batch_size')).toBeNull()
+    expect(screen.queryByLabelText('latent_dim')).toBeNull()
+    expect(screen.queryByLabelText('learning_rate')).toBeNull()
+  })
+
+  it('shows Autoencoder parameters and calls the Autoencoder endpoint', async () => {
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Modelo no supervisado'), { target: { value: 'autoencoder_pytorch' } })
+
+    expect(screen.getByLabelText('epochs')).toBeTruthy()
+    expect(screen.getByLabelText('batch_size')).toBeTruthy()
+    expect(screen.getByLabelText('latent_dim')).toBeTruthy()
+    expect(screen.getByLabelText('learning_rate')).toBeTruthy()
+    expect(screen.queryByLabelText('n_estimators')).toBeNull()
+    expect(screen.queryByLabelText('max_categories')).toBeNull()
+
+    await waitFor(() => expect(api.getAutoencoderMetrics).toHaveBeenCalledWith('preprocessed_run_26'))
+    await waitFor(() => expect(api.getAutoencoderScores).toHaveBeenCalledWith('preprocessed_run_26', expect.objectContaining({ page: 1, page_size: 50, anomaly_flag: 1 })))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar entrenamiento' }))
+    await waitFor(() => expect(api.trainAutoencoderAnomaly).toHaveBeenCalledWith(expect.objectContaining({
+      source_run: 'preprocessed_run_26',
+      contamination: 0.01,
+      epochs: 30,
+      batch_size: 512,
+      latent_dim: 16,
+      learning_rate: 0.001,
+      sample_size: null,
+    })))
+  })
+
+  it('shows controlled PyTorch dependency message for Autoencoder', async () => {
+    api.trainAutoencoderAnomaly.mockResolvedValueOnce({ status: 'AUTOENCODER_DEPENDENCY_NOT_AVAILABLE', algorithm: 'autoencoder_pytorch' })
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Modelo no supervisado'), { target: { value: 'autoencoder_pytorch' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ejecutar entrenamiento' }))
+
+    await waitFor(() => expect(screen.getByText('PyTorch no está disponible en el entorno actual. Instale o habilite PyTorch para entrenar el Autoencoder.')).toBeTruthy())
+  })
+
+  it('shows Autoencoder metrics and scores without fraud labels', async () => {
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Modelo no supervisado'), { target: { value: 'autoencoder_pytorch' } })
+
+    await waitFor(() => expect(screen.getAllByText('autoencoder_pytorch').length).toBeGreaterThan(0))
+    expect(screen.getByText('reconstruction_error')).toBeTruthy()
+    expect(screen.getByText('autoencoder_anomaly_score')).toBeTruthy()
+    expect(screen.getByText('autoencoder_anomaly_flag')).toBeTruthy()
+    expect(screen.queryByText('is_fraud')).toBeNull()
+    expect(screen.queryByText('confirmed_fraud')).toBeNull()
+  })
+
   it('loads anomaly runs, metrics, paginated scores, report and metadata', async () => {
     render(<Models />)
 
@@ -206,8 +340,8 @@ describe('Models page', () => {
     await waitFor(() => expect(api.getAnomalyReport).toHaveBeenCalledWith('run_26'))
     await waitFor(() => expect(api.getAnomalyModelMetadata).toHaveBeenCalledWith('run_26'))
 
-    expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0)
-    expect(screen.getByText('Las anomalías detectadas por el modelo no supervisado no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
+    expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getByText('Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
     expect(screen.getByText('Total de anomalías')).toBeTruthy()
     expect(screen.getAllByText((_, element) => (element?.textContent || '').replace(/\D/g, '') === '5481').length).toBeGreaterThan(0)
     expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('Las anomalías detectadas no representan fraude confirmado.')).length).toBeGreaterThan(0)
@@ -268,6 +402,6 @@ describe('Models route and sidebar', () => {
     )
 
     await waitFor(() => expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0))
-    await waitFor(() => expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0))
   })
 })
