@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes, feature_set_routes, system_log_routes, rule_routes, anomaly_routes, supervised_routes
+from .routes import root, auth_routes, dataset_routes, preprocessing_routes, model_routes, model_evaluation_routes, alert_routes, settings_routes, dashboard_routes, feature_set_routes, system_log_routes, rule_routes, anomaly_routes, supervised_routes, artifact_routes
 from .config import settings
-from .init_db import ensure_transactions_merchant_rubro_column
+from .init_db import ensure_traceability_tables, ensure_transactions_merchant_rubro_column
 
 
 app = FastAPI(title="fraud-detection-system", version="0.1.0")
@@ -44,10 +44,15 @@ app.include_router(system_log_routes.router)
 app.include_router(rule_routes.router)
 app.include_router(anomaly_routes.router)
 app.include_router(supervised_routes.router)
+app.include_router(artifact_routes.router)
 
 
 @app.on_event("startup")
 def ensure_runtime_schema_compatibility():
+    try:
+        ensure_traceability_tables()
+    except Exception:
+        pass
     ensure_transactions_merchant_rubro_column()
 
 

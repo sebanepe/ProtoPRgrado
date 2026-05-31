@@ -8,9 +8,13 @@ import os
 
 from backend.app.database import Base, engine, SessionLocal
 from backend.app.models.models import (
+    ArtifactRegistry,
+    ModelRegistry,
     Role,
     Permission,
     RolePermission,
+    RuleRun,
+    SupervisedDatasetRun,
     User,
 )
 from backend.app.database import engine
@@ -95,6 +99,12 @@ DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "mariokart8$")
 
 def ensure_tables():
     Base.metadata.create_all(bind=engine)
+
+
+def ensure_traceability_tables():
+    """Create C4.2.5 traceability tables without altering existing data."""
+    for model in (ArtifactRegistry, RuleRun, ModelRegistry, SupervisedDatasetRun):
+        model.__table__.create(bind=engine, checkfirst=True)
 
 
 def ensure_transactions_merchant_rubro_column():
@@ -223,6 +233,7 @@ def ensure_admin_user(session: Session, roles: dict):
 def main():
     try:
         ensure_tables()
+        ensure_traceability_tables()
         ensure_transactions_merchant_rubro_column()
     except OperationalError as oe:
         msg = f"Could not connect to the database: {oe}\nEnsure your DATABASE_URL is correct and the DB is reachable."

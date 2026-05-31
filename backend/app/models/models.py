@@ -347,6 +347,92 @@ class RuleAlertReview(Base):
     )
 
 
+class ArtifactRegistry(Base):
+    __tablename__ = "artifact_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    artifact_type = Column(String(100), nullable=False, index=True)
+    phase = Column(String(50), nullable=False, index=True)
+    source_run = Column(String(255), nullable=False, index=True)
+    run_token = Column(String(100), nullable=True, index=True)
+    file_path = Column(String(1024), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    row_count = Column(Integer, nullable=True)
+    checksum = Column(String(128), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False, default="AVAILABLE", index=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_artifact_registry_lookup", "source_run", "artifact_type", "file_path", unique=True),
+        Index("ix_artifact_registry_phase_run", "phase", "source_run"),
+    )
+
+
+class RuleRun(Base):
+    __tablename__ = "rule_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_run = Column(String(255), nullable=False, unique=True, index=True)
+    run_token = Column(String(100), nullable=True, index=True)
+    alerts_file = Column(String(1024), nullable=True)
+    summary_file = Column(String(1024), nullable=True)
+    report_file = Column(String(1024), nullable=True)
+    detailed_alert_count = Column(Integer, nullable=False, default=0)
+    grouped_alert_count = Column(Integer, nullable=False, default=0)
+    status = Column(String(50), nullable=False, default="AVAILABLE", index=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+
+class ModelRegistry(Base):
+    __tablename__ = "model_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_family = Column(String(100), nullable=False, index=True)
+    algorithm = Column(String(255), nullable=False, index=True)
+    source_run = Column(String(255), nullable=False, index=True)
+    run_token = Column(String(100), nullable=True, index=True)
+    model_file = Column(String(1024), nullable=True)
+    metadata_file = Column(String(1024), nullable=True)
+    report_file = Column(String(1024), nullable=True)
+    scores_file = Column(String(1024), nullable=True)
+    feature_file = Column(String(1024), nullable=True)
+    metrics_json = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default="AVAILABLE", index=True)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_model_registry_lookup", "model_family", "algorithm", "source_run", unique=True),
+    )
+
+
+class SupervisedDatasetRun(Base):
+    __tablename__ = "supervised_dataset_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_run = Column(String(255), nullable=False, index=True)
+    run_token = Column(String(100), nullable=True, index=True)
+    dataset_file = Column(String(1024), nullable=True)
+    report_file = Column(String(1024), nullable=True)
+    label_policy = Column(String(255), nullable=False, default="HUMAN_REVIEW_CONFIRMED_FRAUD_DISMISSED")
+    positive_count = Column(Integer, nullable=False, default=0)
+    negative_count = Column(Integer, nullable=False, default=0)
+    usable_total_count = Column(Integer, nullable=False, default=0)
+    technical_ready = Column(Boolean, nullable=False, default=False)
+    recommended_ready = Column(Boolean, nullable=False, default=False)
+    strong_ready = Column(Boolean, nullable=False, default=False)
+    status = Column(String(50), nullable=False, default="PENDING", index=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+
 class ReportExport(Base):
     __tablename__ = "report_exports"
 
