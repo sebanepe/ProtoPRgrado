@@ -80,6 +80,43 @@ def test_double_country_same_day_excludes_unknown():
     assert total_dc == 2
 
 
+def test_double_country_same_day_excludes_pem_10_from_country_consideration():
+    df = tx_frame(
+        [
+            make_tx(1, country_code="BO", pos_entry_mode=7, minutes=0),
+            make_tx(2, country_code="US", pos_entry_mode=10, minutes=5),
+            make_tx(3, country_code="BO", pos_entry_mode=7, minutes=10),
+        ]
+    )
+
+    alerts_df, summary = evaluate_transaction_rules(df, config={"source_run": "26"})
+
+    dc_alerts = alerts_df.loc[alerts_df["rule_code"].astype(str).str.startswith("RULE_DOUBLE_COUNTRY")]
+    assert dc_alerts.empty
+    assert summary["double_country_excluded_pem10"] == 1
+    total_dc = sum(v for k, v in (summary.get("alerts_by_rule_code") or {}).items() if str(k).startswith("RULE_DOUBLE_COUNTRY"))
+    assert total_dc == 0
+
+
+def test_double_country_reason_uses_only_eligible_card_present_countries():
+    df = tx_frame(
+        [
+            make_tx(1, country_code="BO", pos_entry_mode=7, minutes=0),
+            make_tx(2, country_code="AR", pos_entry_mode=7, minutes=5),
+            make_tx(3, country_code="US", pos_entry_mode=10, minutes=10),
+        ]
+    )
+
+    alerts_df, _ = evaluate_transaction_rules(df, config={"source_run": "26"})
+
+    dc_alerts = alerts_df.loc[alerts_df["rule_code"].astype(str).str.startswith("RULE_DOUBLE_COUNTRY")]
+    assert len(dc_alerts) == 2
+    assert set(dc_alerts["country_code"].astype(str)) == {"BO", "AR"}
+    assert set(dc_alerts["pos_entry_mode"].astype(str)) == {"7"}
+    assert dc_alerts["alert_reason"].astype(str).str.contains("Countries: AR, BO").all()
+    assert not dc_alerts["alert_reason"].astype(str).str.contains("US").any()
+
+
 def test_double_country_summary_groups_by_customer_and_date():
     df = tx_frame(
         [

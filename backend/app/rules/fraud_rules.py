@@ -238,29 +238,29 @@ def _double_country_signal_details(group: pd.DataFrame, config: dict[str, Any]) 
 
 
 def _build_double_country_alerts(group: pd.DataFrame, config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    unique_countries = sorted(set(group["country_code"].astype(str).tolist()) - {"UNKNOWN"})
-    if len(unique_countries) < 2:
-        return [], {"double_country_excluded_pem10": 0, "double_country_tnp_discarded_without_additional_signal": 0}
-
     alerts: list[dict[str, Any]] = []
     present_mask = group["_pem_norm"].isin(CARD_PRESENT_POS_ENTRY_MODES) & group["amount"].gt(0)
     absent_mask = group["_pem_norm"].isin(INTERNET_POS_ENTRY_MODES) & group["amount"].gt(0)
     excluded_pem10 = int((group["_pem_norm"] == RECURRING_POS_ENTRY_MODE).sum())
     tnp_discarded_without_signal = 0
 
-    if present_mask.any():
-        reason = _double_country_alert_reason(unique_countries, DOUBLE_COUNTRY_CARD_PRESENT_RULE)
+    present_group = group.loc[present_mask]
+    present_countries = sorted(set(present_group["country_code"].astype(str).tolist()) - {"UNKNOWN"})
+    if len(present_countries) >= 2:
+        reason = _double_country_alert_reason(present_countries, DOUBLE_COUNTRY_CARD_PRESENT_RULE)
         for _, row in group.loc[present_mask].iterrows():
             alert = _build_alert_row(row, DOUBLE_COUNTRY_CARD_PRESENT_RULE, reason, config)
             alert["risk_level"] = "HIGH"
             alert["risk_score"] = 85
             alerts.append(alert)
 
-    if absent_mask.any():
-        signals = _double_country_signal_details(group.loc[absent_mask], config)
+    absent_group = group.loc[absent_mask]
+    absent_countries = sorted(set(absent_group["country_code"].astype(str).tolist()) - {"UNKNOWN"})
+    if len(absent_countries) >= 2:
+        signals = _double_country_signal_details(absent_group, config)
         if signals:
             risk_level, risk_score = _risk_from_context_signal_count(len(signals))
-            reason = _double_country_alert_reason(unique_countries, DOUBLE_COUNTRY_CARD_ABSENT_RULE) + f" Signals: {', '.join(signals)}"
+            reason = _double_country_alert_reason(absent_countries, DOUBLE_COUNTRY_CARD_ABSENT_RULE) + f" Signals: {', '.join(signals)}"
             triggered_rules = f"{DOUBLE_COUNTRY_CARD_ABSENT_RULE}|" + "|".join(signals)
             for _, row in group.loc[absent_mask].iterrows():
                 alert = _build_alert_row(row, DOUBLE_COUNTRY_CARD_ABSENT_RULE, reason, config)
@@ -491,6 +491,8 @@ def evaluate_transaction_rules(df: pd.DataFrame, config: dict[str, Any] | None =
         "deduplicated_alerts": int(deduplicated_alerts),
         "alerts_by_rule_code": alerts_df["rule_code"].value_counts().to_dict() if not alerts_df.empty else {},
         "alerts_by_risk_level": alerts_df["risk_level"].value_counts().to_dict() if not alerts_df.empty else {},
+        "double_country_excluded_pem10": int(double_country_excluded_pem10),
+        "double_country_tnp_discarded_without_additional_signal": int(double_country_tnp_discarded_without_additional_signal),
         "config": config,
     }
 

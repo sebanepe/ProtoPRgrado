@@ -658,6 +658,28 @@ def test_rule_routes_endpoints(monkeypatch, test_client, tmp_path):
     assert limited_page_size.json()["page_size"] == 200
 
 
+def test_rule_analyze_force_reuses_numeric_run_artifact_names(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    _write_sample_rule_files(processed_dir)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+
+    response = test_client.post(
+        "/api/rules/analyze",
+        json={"preprocessed_run_id": "preprocessed_run_26", "force": True, "config": {}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "COMPLETED"
+    assert payload["alerts_file"] == "alerts_run_26.csv"
+    assert payload["summary_file"] == "alerts_summary_run_26.csv"
+    assert payload["report_file"] == "rules_report_run_26.md"
+    assert (processed_dir / "alerts_run_26.csv").exists()
+    assert (processed_dir / "alerts_summary_run_26.csv").exists()
+    assert not (processed_dir / "alerts_run_preprocessed_run_26.csv").exists()
+    assert not (processed_dir / "alerts_summary_run_preprocessed_run_26.csv").exists()
+
+
 def test_customer_card_lookup_returns_masked_card(monkeypatch, test_client, tmp_path):
     uploads_dir = tmp_path / "uploads"
     customer_hash = _write_customer_card_lookup_files(uploads_dir)

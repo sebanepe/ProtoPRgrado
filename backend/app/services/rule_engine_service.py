@@ -389,10 +389,10 @@ def generate_alerts_from_preprocessed_csv(
         DOUBLE_COUNTRY_CARD_ABSENT_RULE: _pem_distribution(DOUBLE_COUNTRY_CARD_ABSENT_RULE),
     }
 
-    double_country_excluded_pem10 = 0
-    double_country_tnp_discarded_without_additional_signal = 0
-    if not alerts_df.empty and "pos_entry_mode" in alerts_df.columns:
-        double_country_excluded_pem10 = 0
+    double_country_excluded_pem10 = int(summary.get("double_country_excluded_pem10", 0) or 0)
+    double_country_tnp_discarded_without_additional_signal = int(
+        summary.get("double_country_tnp_discarded_without_additional_signal", 0) or 0
+    )
 
     summary.update(
         {
