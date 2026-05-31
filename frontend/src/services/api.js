@@ -179,6 +179,21 @@ export async function getRulesMetrics(runId){
 }
 
 // ============================================================
+// Phase C.4: Supervised Models Readiness API Functions
+// ============================================================
+export async function getHumanLabelSummary(sourceRun = null){
+  const params = {}
+  if (sourceRun != null && String(sourceRun).trim() !== '') params.source_run = String(sourceRun).trim()
+  return api.get('/api/supervised/human-label-summary', { params }).then(r=> r.data)
+}
+
+export async function getHumanReadiness(sourceRun = null){
+  const params = {}
+  if (sourceRun != null && String(sourceRun).trim() !== '') params.source_run = String(sourceRun).trim()
+  return api.get('/api/supervised/human-readiness', { params }).then(r=> r.data)
+}
+
+// ============================================================
 // PHASE B.3: Alert Review API Functions
 // ============================================================
 
