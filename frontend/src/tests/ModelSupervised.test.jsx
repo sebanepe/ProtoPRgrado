@@ -103,12 +103,12 @@ describe('ModelSupervised page', () => {
     await waitFor(() => expect(screen.getByText('Minimo tecnico')).toBeTruthy())
     expect(screen.getByText('Recomendado')).toBeTruthy()
     expect(screen.getByText('Meta fuerte')).toBeTruthy()
-    expect(screen.getByLabelText('Positivos: 4 / 20')).toBeTruthy()
-    expect(screen.getByLabelText('Negativos: 6 / 20')).toBeTruthy()
-    expect(screen.getByLabelText('Positivos: 4 / 50')).toBeTruthy()
-    expect(screen.getByLabelText('Negativos: 6 / 120')).toBeTruthy()
-    expect(screen.getByLabelText('Positivos: 4 / 70')).toBeTruthy()
-    expect(screen.getByLabelText('Negativos: 6 / 180')).toBeTruthy()
+    expect(await screen.findByLabelText('Positivos: 4 / 20')).toBeTruthy()
+    expect(await screen.findByLabelText('Negativos: 6 / 20')).toBeTruthy()
+    expect(await screen.findByLabelText('Positivos: 4 / 50')).toBeTruthy()
+    expect(await screen.findByLabelText('Negativos: 6 / 120')).toBeTruthy()
+    expect(await screen.findByLabelText('Positivos: 4 / 70')).toBeTruthy()
+    expect(await screen.findByLabelText('Negativos: 6 / 180')).toBeTruthy()
   })
 
   it('shows insufficient readiness and keeps supervised training disabled', async () => {
