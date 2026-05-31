@@ -1341,18 +1341,18 @@ export default function RulesAlerts() {
                 )}
                 {!loadingSummaryTransactions && !summaryTransactionsError && summaryTransactions.length > 0 && (
                   <div className="table-scroll">
-                    <table className="table detail-table" style={{ fontSize: 12 }}>
+                    <table className="table detail-table summary-transactions-table" style={{ fontSize: 12 }}>
                       <thead>
                         <tr>
                           <th>N°</th>
-                          <th>transaction_datetime</th>
+                          <th>Fecha/Hora</th>
                           <th>Monto</th>
                           <th>País</th>
                           <th>POS Entry</th>
                           <th>MCC/Rubro</th>
-                          <th>masked_card</th>
-                          <th>transaction_id</th>
-                          <th>risk_score</th>
+                          <th>Tarjeta</th>
+                          <th>Comercio</th>
+                          <th>Riesgo</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1370,7 +1370,7 @@ export default function RulesAlerts() {
                             <td>{transaction.pos_entry_mode || 'N/A'}</td>
                             <td>{transaction.merchant_rubro_proxy || 'N/A'}</td>
                             <td>{transaction.masked_card || 'No disponible'}</td>
-                            <td>{transaction.transaction_id || 'N/A'}</td>
+                            <td title={transaction.transaction_id || ''}>{transaction.merchant_name || 'No disponible'}</td>
                             <td>{transaction.risk_score ?? 'N/A'}</td>
                           </tr>
                         ))}

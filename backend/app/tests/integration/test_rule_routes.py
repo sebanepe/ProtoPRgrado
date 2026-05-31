@@ -835,6 +835,81 @@ def test_summary_transactions_uses_child_transaction_ids_when_present(monkeypatc
     assert payload["warning"] is None
 
 
+def test_summary_transactions_enriches_merchant_name_from_preprocessed(monkeypatch, test_client, tmp_path):
+    processed_dir = tmp_path / "processed"
+    uploads_dir = tmp_path / "uploads"
+    customer_hash = _write_customer_card_lookup_files(uploads_dir)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    summary_alert_id = "26-S-MERCHANT-0001"
+
+    pd.DataFrame(
+        [
+            {
+                "summary_alert_id": summary_alert_id,
+                "source_run": "26",
+                "customer_hash": customer_hash,
+                "rule_code": "RULE_VELOCITY_CARD_HOUR",
+                "rule_name": "Velocity card hour",
+                "risk_level": "MEDIUM",
+                "max_risk_score": 60.0,
+                "count_transactions": 1,
+                "countries_detected": "BO",
+                "child_transaction_ids": "tx-merchant-001",
+                "window_start": "2026-04-06T12:38:00+00:00",
+                "window_end": "2026-04-06T12:39:00+00:00",
+                "representative_transaction_id": "tx-merchant-001",
+                "status": "NEW",
+                "created_at": "2026-04-06T12:40:00+00:00",
+            }
+        ]
+    ).to_csv(processed_dir / "alerts_summary_run_26.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "alert_id": "26-000501",
+                "source_run": "26",
+                "transaction_id": "tx-merchant-001",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-06T12:38:32+00:00",
+                "amount": 199.0,
+                "country_code": "BO",
+                "pos_entry_mode": "1",
+                "merchant_rubro_proxy": "4814",
+                "risk_score": 60,
+                "rule_code": "RULE_VELOCITY_CARD_HOUR",
+                "rule_name": "Velocity card hour",
+                "status": "NEW",
+            }
+        ]
+    ).to_csv(processed_dir / "alerts_run_26.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "transaction_id": "tx-merchant-001",
+                "customer_hash": customer_hash,
+                "transaction_datetime": "2026-04-06 12:38:32",
+                "amount": 199.0,
+                "country_code": "BO",
+                "pos_entry_mode": "1",
+                "merchant_rubro_proxy": "4814",
+                "merchant_name": "TELEFONIA LA PAZ",
+            }
+        ]
+    ).to_csv(processed_dir / "preprocessed_run_26.csv", index=False)
+    monkeypatch.setattr(rule_routes, "_processed_dir", lambda: processed_dir)
+    monkeypatch.setattr(rule_routes, "_uploads_dir", lambda: uploads_dir)
+
+    response = test_client.get(
+        "/api/rules/summary-transactions",
+        params={"run_id": "preprocessed_run_26", "alert_id": summary_alert_id},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["merchant_name"] == "TELEFONIA LA PAZ"
+    assert item["risk_score"] == 60
+
+
 def test_summary_transactions_respects_run_id_and_returns_empty_when_no_detail(monkeypatch, test_client, tmp_path):
     processed_dir = tmp_path / "processed"
     uploads_dir = tmp_path / "uploads"

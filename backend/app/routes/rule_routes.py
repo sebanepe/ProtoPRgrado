@@ -297,6 +297,14 @@ def _parse_country_list(value: Any) -> list[str]:
     return normalized
 
 
+def _merge_missing_row_values(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    for key, value in source.items():
+        current_value = target.get(key)
+        if _normalize_filter_value(current_value) is None and _normalize_filter_value(value) is not None:
+            target[key] = value
+    return target
+
+
 def _rows_by_transaction_ids(dataframes: list[pd.DataFrame], transaction_ids: list[str]) -> list[dict[str, Any]]:
     if not transaction_ids:
         return []
@@ -307,8 +315,13 @@ def _rows_by_transaction_ids(dataframes: list[pd.DataFrame], transaction_ids: li
             continue
         for _, row in dataframe.iterrows():
             transaction_id = _normalize_filter_value(row.get("transaction_id"))
-            if transaction_id and transaction_id not in row_map:
-                row_map[transaction_id] = row.to_dict()
+            if not transaction_id:
+                continue
+            row_dict = row.to_dict()
+            if transaction_id not in row_map:
+                row_map[transaction_id] = row_dict
+            else:
+                _merge_missing_row_values(row_map[transaction_id], row_dict)
 
     resolved_rows: list[dict[str, Any]] = []
     for transaction_id in transaction_ids:
@@ -428,6 +441,10 @@ def _reconstruct_double_country_summary_rows(
         transaction_id = _normalize_filter_value(row.get("transaction_id"))
         if transaction_id:
             if transaction_id in seen_transaction_ids:
+                for existing_row in deduplicated_rows:
+                    if _normalize_filter_value(existing_row.get("transaction_id")) == transaction_id:
+                        _merge_missing_row_values(existing_row, row)
+                        break
                 continue
             seen_transaction_ids.add(transaction_id)
         deduplicated_rows.append(row)

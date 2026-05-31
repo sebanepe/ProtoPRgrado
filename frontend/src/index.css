@@ -565,6 +565,55 @@ button, input, select, textarea {
 	min-width: 100%;
 }
 
+.summary-transactions-table {
+	min-width: 980px;
+	table-layout: fixed;
+}
+
+.summary-transactions-table th,
+.summary-transactions-table td {
+	overflow-wrap: anywhere;
+	word-break: normal;
+}
+
+.summary-transactions-table th {
+	line-height: 1.25;
+}
+
+.summary-transactions-table th:nth-child(1),
+.summary-transactions-table td:nth-child(1) {
+	width: 54px;
+	white-space: nowrap;
+}
+
+.summary-transactions-table th:nth-child(2),
+.summary-transactions-table td:nth-child(2) {
+	width: 170px;
+}
+
+.summary-transactions-table th:nth-child(3),
+.summary-transactions-table td:nth-child(3),
+.summary-transactions-table th:nth-child(4),
+.summary-transactions-table td:nth-child(4),
+.summary-transactions-table th:nth-child(5),
+.summary-transactions-table td:nth-child(5),
+.summary-transactions-table th:nth-child(6),
+.summary-transactions-table td:nth-child(6),
+.summary-transactions-table th:nth-child(9),
+.summary-transactions-table td:nth-child(9) {
+	width: 88px;
+}
+
+.summary-transactions-table th:nth-child(7),
+.summary-transactions-table td:nth-child(7) {
+	width: 150px;
+}
+
+.summary-transactions-table th:nth-child(8),
+.summary-transactions-table td:nth-child(8) {
+	width: 220px;
+}
+
 .detail-table td:first-child,
 .detail-table th:first-child {
 	white-space: nowrap;
