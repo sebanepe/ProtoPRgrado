@@ -323,6 +323,7 @@ def build_human_supervised_alert_dataset(
     source_run: str,
     db: Optional[Session] = None,
     output_dir: str | Path | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     own_session = db is None
     session = db or SessionLocal()
@@ -332,6 +333,75 @@ def build_human_supervised_alert_dataset(
         run_token = artifacts.normalize_run_token(normalized)
         processed = _processed_dir(output_dir)
         processed.mkdir(parents=True, exist_ok=True)
+        dataset_path = processed / f"supervised_human_alert_dataset_run_{run_token}.csv"
+        report_path = processed / f"supervised_human_dataset_report_run_{run_token}.md"
+
+        if dataset_path.exists() and not force:
+            dataset_df = pd.read_csv(dataset_path)
+            positive_count = int((pd.to_numeric(dataset_df.get("target_human_label", pd.Series(dtype=int)), errors="coerce") == 1).sum())
+            negative_count = int((pd.to_numeric(dataset_df.get("target_human_label", pd.Series(dtype=int)), errors="coerce") == 0).sum())
+            readiness = _readiness(positive_count, negative_count)
+            status = _dataset_status(readiness, len(dataset_df))
+            supervised_run = _upsert_supervised_run(
+                session,
+                source_run=normalized,
+                run_token=run_token,
+                dataset_path=dataset_path,
+                report_path=report_path if report_path.exists() else None,
+                positive_count=positive_count,
+                negative_count=negative_count,
+                readiness=readiness,
+                status=status,
+                metadata={
+                    "source_reviews_table": "rule_alert_reviews",
+                    "join_key": "source_run + summary_alert_id",
+                    "existing_dataset_reused": True,
+                },
+            )
+            dataset_artifact = artifacts.register_or_update_artifact(
+                session,
+                artifact_type=artifacts.ARTIFACT_SUPERVISED_DATASET,
+                phase=artifacts.PHASE_C4,
+                source_run=normalized,
+                run_token=run_token,
+                file_path=dataset_path,
+                metadata={
+                    "label_policy": LABEL_POLICY,
+                    "positive_count": positive_count,
+                    "negative_count": negative_count,
+                    "usable_total_count": positive_count + negative_count,
+                    "existing_dataset_reused": True,
+                    **readiness,
+                },
+            )
+            report_artifact = None
+            if report_path.exists():
+                report_artifact = artifacts.register_or_update_artifact(
+                    session,
+                    artifact_type=artifacts.ARTIFACT_SUPERVISED_REPORT,
+                    phase=artifacts.PHASE_C4,
+                    source_run=normalized,
+                    run_token=run_token,
+                    file_path=report_path,
+                    metadata={"label_policy": LABEL_POLICY, "supervised_dataset_run_id": supervised_run.id},
+                )
+            return {
+                "status": "COMPLETED",
+                "verdict": "HUMAN_SUPERVISED_DATASET_REUSED",
+                "source_run": normalized,
+                "dataset_file": dataset_path.name,
+                "dataset_path": str(dataset_path),
+                "report_file": report_path.name if report_path.exists() else None,
+                "report_path": str(report_path) if report_path.exists() else None,
+                "usable_positive_labels": positive_count,
+                "usable_negative_labels": negative_count,
+                "usable_total_labels": positive_count + negative_count,
+                **readiness,
+                "artifact_registry_dataset_id": dataset_artifact.id,
+                "artifact_registry_report_id": report_artifact.id if report_artifact else None,
+                "supervised_dataset_run_id": supervised_run.id,
+                "warnings": warnings,
+            }
 
         summary_path, alerts_path, source_mode, source_warnings = _resolve_input_files(session, normalized, run_token, processed)
         warnings.extend(source_warnings)
@@ -389,8 +459,6 @@ def build_human_supervised_alert_dataset(
             if column in dataset_df.columns:
                 dataset_df = dataset_df.drop(columns=[column])
 
-        dataset_path = processed / f"supervised_human_alert_dataset_run_{run_token}.csv"
-        report_path = processed / f"supervised_human_dataset_report_run_{run_token}.md"
         dataset_df.to_csv(dataset_path, index=False)
         status = _dataset_status(readiness, len(dataset_df))
         metadata = {

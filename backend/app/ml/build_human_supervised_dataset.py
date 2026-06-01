@@ -10,9 +10,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build the human supervised alert dataset")
     parser.add_argument("--source-run", required=True)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    result = build_human_supervised_alert_dataset(args.source_run, output_dir=args.output_dir)
+    result = build_human_supervised_alert_dataset(args.source_run, output_dir=args.output_dir, force=args.force)
     print(result.get("verdict"))
     print(json.dumps(result, ensure_ascii=True, indent=2, sort_keys=True))
 

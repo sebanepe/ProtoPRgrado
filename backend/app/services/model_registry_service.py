@@ -170,3 +170,53 @@ def register_autoencoder_model(
     db.commit()
     db.refresh(existing)
     return existing
+
+
+def register_supervised_human_model(
+    db: Session,
+    *,
+    source_run: str,
+    algorithm: str,
+    model_file: str,
+    metadata_file: str,
+    report_file: str,
+    predictions_file: str,
+    feature_file: str,
+    metrics: dict[str, Any],
+) -> ModelRegistry:
+    normalized = artifacts.normalize_source_run(source_run)
+    run_token = artifacts.normalize_run_token(normalized)
+    existing = (
+        db.query(ModelRegistry)
+        .filter(
+            ModelRegistry.model_family == "SUPERVISED_HUMAN",
+            ModelRegistry.algorithm == algorithm,
+            ModelRegistry.source_run == normalized,
+        )
+        .first()
+    )
+    payload = {
+        "run_token": run_token,
+        "model_file": model_file,
+        "metadata_file": metadata_file,
+        "report_file": report_file,
+        "scores_file": predictions_file,
+        "feature_file": feature_file,
+        "metrics_json": json.dumps(metrics, ensure_ascii=True, sort_keys=True),
+        "status": "AVAILABLE",
+        "is_active": False,
+    }
+    if existing is None:
+        existing = ModelRegistry(
+            model_family="SUPERVISED_HUMAN",
+            algorithm=algorithm,
+            source_run=normalized,
+            **payload,
+        )
+        db.add(existing)
+    else:
+        for key, value in payload.items():
+            setattr(existing, key, value)
+    db.commit()
+    db.refresh(existing)
+    return existing

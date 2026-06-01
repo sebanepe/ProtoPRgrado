@@ -81,6 +81,64 @@ def write_summary_artifacts(db_session, tmp_path: Path, token: str) -> None:
     )
 
 
+def write_training_summary_artifacts(db_session, tmp_path: Path, token: str, positives: int = 20, negatives: int = 20) -> str:
+    source_run = f"preprocessed_run_{token}"
+    rows = []
+    reviews = []
+    for label, count, status in [("pos", positives, "CONFIRMED_FRAUD"), ("neg", negatives, "DISMISSED")]:
+        for index in range(count):
+            summary_id = f"{token}-S-{label}-{index}"
+            rows.append(
+                {
+                    "summary_alert_id": summary_id,
+                    "source_run": source_run,
+                    "customer_hash": f"cust-{label}-{index}",
+                    "rule_code": "RULE_DOUBLE_COUNTRY" if label == "pos" else "RULE_MCC_RISK",
+                    "rule_name": "Double Country" if label == "pos" else "MCC Risk",
+                    "risk_level": "HIGH" if label == "pos" else "LOW",
+                    "max_risk_score": 90 if label == "pos" else 20,
+                    "count_transactions": 3 if label == "pos" else 1,
+                    "countries_detected": "BO|PE" if label == "pos" else "BO",
+                    "merchant_rubro_proxy": "7995" if label == "pos" else "5411",
+                    "merchant_rubro_values": "7995" if label == "pos" else "5411",
+                    "window_start": "2026-01-01T00:00:00Z",
+                    "window_end": "2026-01-01T00:30:00Z",
+                    "representative_transaction_id": f"tx-{label}-{index}",
+                    "status": "NEW",
+                    "PAN_TARJETA": "sensitive",
+                }
+            )
+            reviews.append(
+                RuleAlertReview(
+                    source_run=source_run,
+                    summary_alert_id=summary_id,
+                    rule_code=rows[-1]["rule_code"],
+                    new_status=status,
+                )
+            )
+    summary = tmp_path / f"alerts_summary_run_{token}.csv"
+    alerts = tmp_path / f"alerts_run_{token}.csv"
+    pd.DataFrame(rows).to_csv(summary, index=False)
+    pd.DataFrame([{"alert_id": f"a-{index}"} for index in range(len(rows))]).to_csv(alerts, index=False)
+    db_session.add_all(reviews)
+    db_session.commit()
+    artifacts.register_or_update_artifact(
+        db_session,
+        artifact_type=artifacts.ARTIFACT_RULE_SUMMARY_CSV,
+        phase=artifacts.PHASE_B,
+        source_run=source_run,
+        file_path=summary,
+    )
+    artifacts.register_or_update_artifact(
+        db_session,
+        artifact_type=artifacts.ARTIFACT_RULE_ALERTS_CSV,
+        phase=artifacts.PHASE_B,
+        source_run=source_run,
+        file_path=alerts,
+    )
+    return source_run
+
+
 def test_human_label_summary_endpoint_returns_zero_counts(test_client):
     response = test_client.get(
         "/api/supervised/human-label-summary",
@@ -210,7 +268,7 @@ def test_build_human_dataset_route_and_related_endpoints(test_client, db_session
     )
     db_session.commit()
 
-    build = test_client.post("/api/supervised/build-human-dataset", json={"source_run": source_run})
+    build = test_client.post("/api/supervised/build-human-dataset", json={"source_run": source_run, "force": True})
     assert build.status_code == 200
     payload = build.json()
     assert payload["verdict"] == "HUMAN_SUPERVISED_DATASET_CREATED"
@@ -249,3 +307,66 @@ def test_build_human_dataset_route_handles_no_usable_labels(test_client, db_sess
     payload = response.json()
     assert payload["status"] == "NOT_CREATED"
     assert payload["verdict"] == "DATASET_NOT_CREATED_INSUFFICIENT_HUMAN_LABELS"
+
+
+def test_training_preflight_returns_can_train_for_valid_dataset(test_client, db_session, tmp_path, monkeypatch):
+    monkeypatch.setenv("PROJECT_PROCESSED_DIR", str(tmp_path))
+    source_run = write_training_summary_artifacts(db_session, tmp_path, "941")
+    build = test_client.post("/api/supervised/build-human-dataset", json={"source_run": source_run})
+    assert build.status_code == 200
+
+    response = test_client.get("/api/supervised/training-preflight", params={"source_run": source_run})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_train"] is True
+    assert payload["blocking_reason"] is None
+    assert payload["dataset"]["verdict"] == "HUMAN_SUPERVISED_DATASET_READY"
+    assert payload["dataset"]["positive_count"] == 20
+    assert payload["dataset"]["negative_count"] == 20
+
+
+def test_training_preflight_blocks_when_dataset_missing(test_client, db_session):
+    source_run = "preprocessed_run_942"
+    add_reviews(db_session, source_run, "CONFIRMED_FRAUD", 20)
+    add_reviews(db_session, source_run, "DISMISSED", 20)
+
+    response = test_client.get("/api/supervised/training-preflight", params={"source_run": source_run})
+
+    assert response.status_code == 200
+    assert response.json()["can_train"] is False
+    assert response.json()["blocking_reason"] == "SUPERVISED_DATASET_NOT_FOUND"
+
+
+def test_train_human_model_builds_validates_and_registers(test_client, db_session, tmp_path, monkeypatch):
+    monkeypatch.setenv("PROJECT_PROCESSED_DIR", str(tmp_path))
+    monkeypatch.setenv("PROJECT_MODELS_DIR", str(tmp_path / "models"))
+    source_run = write_training_summary_artifacts(db_session, tmp_path, "943")
+
+    response = test_client.post(
+        "/api/supervised/train-human-model",
+        json={"source_run": source_run, "model_type": "random_forest"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["verdict"] == "HUMAN_SUPERVISED_TRAINING_COMPLETED"
+    predictions = pd.read_csv(payload["files"]["predictions"])
+    assert "is_fraud" not in predictions.columns
+    assert "confirmed_fraud" not in predictions.columns
+    assert "PAN_TARJETA" not in predictions.columns
+    assert payload["model_registry_id"] is not None
+    assert payload["artifact_registry"]["model"] is not None
+
+
+def test_train_human_model_blocks_mlp_without_recommended_labels(test_client, db_session, tmp_path, monkeypatch):
+    monkeypatch.setenv("PROJECT_PROCESSED_DIR", str(tmp_path))
+    source_run = write_training_summary_artifacts(db_session, tmp_path, "944")
+
+    response = test_client.post(
+        "/api/supervised/train-human-model",
+        json={"source_run": source_run, "model_type": "mlp"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["blocking_reason"] == "INSUFFICIENT_RECOMMENDED_HUMAN_LABELS"

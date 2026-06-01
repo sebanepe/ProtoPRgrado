@@ -66,7 +66,8 @@ def _build_preprocessor(feature_frame: pd.DataFrame) -> tuple[ColumnTransformer,
 def _build_model(model_name: str, contamination: float, n_rows: int):
     key = model_name.lower().strip()
     if key == "isolation_forest":
-        return IsolationForest(n_estimators=200, contamination=contamination, random_state=42, n_jobs=-1), key
+        n_jobs = int(os.environ.get("ANOMALY_ISOLATION_FOREST_N_JOBS", "1"))
+        return IsolationForest(n_estimators=200, contamination=contamination, random_state=42, n_jobs=n_jobs), key
     if key == "local_outlier_factor":
         n_neighbors = min(20, max(2, n_rows - 1))
         return LocalOutlierFactor(n_neighbors=n_neighbors, novelty=True, contamination=contamination), key

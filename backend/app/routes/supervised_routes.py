@@ -13,6 +13,8 @@ from backend.app.ml.supervised_dataset_builder import (
     supervised_dataset_run_to_dict,
 )
 from backend.app.ml.validate_human_supervised_dataset import validate_human_supervised_dataset
+from backend.app.ml.supervised_training_preflight import run_training_preflight
+from backend.app.ml.train_human_supervised_model import train_human_supervised_model
 from backend.app.services import artifact_registry_service as artifacts
 from backend.app.services import supervised_service
 
@@ -22,6 +24,12 @@ router = APIRouter(prefix="/api/supervised", tags=["supervised"])
 
 class BuildHumanDatasetRequest(BaseModel):
     source_run: str
+    force: bool = False
+
+
+class TrainHumanModelRequest(BaseModel):
+    source_run: str
+    model_type: str
 
 
 @router.get("/human-label-summary")
@@ -45,7 +53,7 @@ def build_human_dataset(
     request: BuildHumanDatasetRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return build_human_supervised_alert_dataset(request.source_run, db=db)
+    return build_human_supervised_alert_dataset(request.source_run, db=db, force=request.force)
 
 
 @router.get("/human-dataset-summary")
@@ -141,4 +149,23 @@ def validate_human_dataset(
     result = validate_human_supervised_dataset(data_path)
     result["source_run"] = normalized
     result["dataset_file"] = str(data_path)
+    return result
+
+
+@router.get("/training-preflight")
+def get_training_preflight(
+    source_run: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return run_training_preflight(source_run, db, build_if_missing=False)
+
+
+@router.post("/train-human-model")
+def train_human_model(
+    request: TrainHumanModelRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    result = train_human_supervised_model(request.source_run, request.model_type, db=db)
+    if result.get("status") == "BLOCKED":
+        raise HTTPException(status_code=409, detail=result)
     return result
