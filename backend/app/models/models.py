@@ -252,6 +252,33 @@ class ScoredTransaction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class BatchScoringRun(Base):
+    __tablename__ = "batch_scoring_runs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    source_run        = Column(String(255), nullable=False, index=True)
+    run_token         = Column(String(100), nullable=True, index=True)
+    model_family      = Column(String(100), nullable=False, default="SUPERVISED_HUMAN")
+    algorithm         = Column(String(255), nullable=False, index=True)
+    model_registry_id = Column(Integer, nullable=True)
+    model_file        = Column(String(1024), nullable=True)
+    input_file        = Column(String(1024), nullable=True)
+    results_file      = Column(String(1024), nullable=True)
+    report_file       = Column(String(1024), nullable=True)
+    metadata_file     = Column(String(1024), nullable=True)
+    total_scored      = Column(Integer, nullable=False, default=0)
+    high_count        = Column(Integer, nullable=False, default=0)
+    medium_count      = Column(Integer, nullable=False, default=0)
+    low_count         = Column(Integer, nullable=False, default=0)
+    status            = Column(String(50), nullable=False, default="PENDING", index=True)
+    error_message     = Column(Text, nullable=True)
+    params_json       = Column(Text, nullable=True)
+    started_at        = Column(DateTime(timezone=True), nullable=True)
+    finished_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+
 class FraudAlert(Base):
     __tablename__ = "fraud_alerts"
 

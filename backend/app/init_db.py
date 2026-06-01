@@ -9,6 +9,7 @@ import os
 from backend.app.database import Base, engine, SessionLocal
 from backend.app.models.models import (
     ArtifactRegistry,
+    BatchScoringRun,
     ModelRegistry,
     Role,
     Permission,
@@ -103,7 +104,7 @@ def ensure_tables():
 
 def ensure_traceability_tables():
     """Create C4.2.5 traceability tables without altering existing data."""
-    for model in (ArtifactRegistry, RuleRun, ModelRegistry, SupervisedDatasetRun):
+    for model in (ArtifactRegistry, RuleRun, ModelRegistry, SupervisedDatasetRun, BatchScoringRun):
         model.__table__.create(bind=engine, checkfirst=True)
 
 
