@@ -173,6 +173,49 @@ export async function getHumanReadiness(sourceRun = null){
   return api.get('/api/supervised/human-readiness', { params }).then(r=> r.data)
 }
 
+export async function getSupervisedTrainingPreflight(sourceRun){
+  return api.get('/api/supervised/training-preflight', { params: { source_run: sourceRun } }).then(r=> r.data)
+}
+
+export async function buildHumanSupervisedDataset(sourceRun, options = {}){
+  return api.post('/api/supervised/build-human-dataset', {
+    source_run: sourceRun,
+    force: Boolean(options.force)
+  }).then(r=> r.data)
+}
+
+export async function trainHumanSupervisedModel(payload){
+  return api.post('/api/supervised/train-human-model', payload).then(r=> r.data)
+}
+
+export async function getSupervisedTrainingRuns(sourceRun){
+  return api.get('/api/supervised/training-runs', { params: { source_run: sourceRun } }).then(r=> r.data)
+}
+
+export async function getSupervisedModelMetadata(sourceRun, modelType){
+  return api.get('/api/supervised/model-metadata', { params: { source_run: sourceRun, model_type: modelType } }).then(r=> r.data)
+}
+
+export async function getSupervisedModelReport(sourceRun, modelType){
+  return api.get('/api/supervised/model-report', { params: { source_run: sourceRun, model_type: modelType } }).then(r=> r.data)
+}
+
+export async function getSupervisedModelPredictions(sourceRun, modelType, params = {}){
+  return api.get('/api/supervised/model-predictions', { params: { source_run: sourceRun, model_type: modelType, ...params } }).then(r=> r.data)
+}
+
+export async function getHumanDatasetSummary(sourceRun){
+  return api.get('/api/supervised/human-dataset-summary', { params: { source_run: sourceRun } }).then(r=> r.data)
+}
+
+export async function getHumanDatasetPreview(sourceRun, params = {}){
+  return api.get('/api/supervised/human-dataset-preview', { params: { source_run: sourceRun, ...params } }).then(r=> r.data)
+}
+
+export async function validateHumanDataset(sourceRun){
+  return api.get('/api/supervised/human-dataset-validate', { params: { source_run: sourceRun } }).then(r=> r.data)
+}
+
 // ============================================================
 // PHASE B.3: Alert Review API Functions
 // ============================================================
