@@ -95,10 +95,24 @@ export async function saveModelConfig(payload){ return setModelConfig(payload) }
 export async function trainModel(payload){ return api.post('/models/train', payload).then(r=> r.data) }
 export async function activateModel(modelId){ return api.post(`/models/${modelId}/activate`).then(r=> r.data) }
 export async function exportModelResults(modelId){ return api.get(`/models/${modelId}/export`, { responseType: 'blob' }).then(r=> r.data) }
-export async function runBatchScoring(payload){ // payload: { transactions: [...], dataset_id? }
-  // map to existing alerts.generate endpoint
-  const transactions = payload && payload.transactions ? payload.transactions : []
-  return api.post('/alerts/generate', transactions).then(r=> r.data)
+export async function runBatchScoring(payload) {
+  // payload: { source_run, algorithm, input_dataset_path? }
+  return api.post('/api/scoring/batch-run', payload).then(r => r.data)
+}
+export async function getBatchScoringRuns(params = {}) {
+  return api.get('/api/scoring/runs', { params }).then(r => r.data)
+}
+export async function getBatchScoringRunById(id) {
+  return api.get(`/api/scoring/runs/${id}`).then(r => r.data)
+}
+export async function getBatchScoringResults(params = {}) {
+  return api.get('/api/scoring/results', { params }).then(r => r.data)
+}
+export async function getBatchScoringReport(params = {}) {
+  return api.get('/api/scoring/report', { params }).then(r => r.data)
+}
+export async function getBatchScoringMetadata(params = {}) {
+  return api.get('/api/scoring/metadata', { params }).then(r => r.data)
 }
 export async function getReportingSummary(){ return api.get('/reporting/summary').then(r=> r.data).catch(()=>null) }
 export async function getUsers(){ return api.get('/users').then(r=> r.data && r.data.users ? r.data.users : []) }

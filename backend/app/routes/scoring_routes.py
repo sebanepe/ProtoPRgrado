@@ -212,3 +212,44 @@ def get_scoring_report(
         "report_file": run.report_file,
         "markdown": markdown,
     }
+
+
+@router.get("/metadata")
+def get_scoring_metadata(
+    source_run: str = Query(...),
+    algorithm: str = Query(...),
+    db: Session = Depends(get_db),
+    _auth=Depends(require_permission("scoring")),
+) -> dict[str, Any]:
+    run = (
+        db.query(BatchScoringRun)
+        .filter(
+            BatchScoringRun.source_run == source_run,
+            BatchScoringRun.algorithm == algorithm,
+            BatchScoringRun.status == "COMPLETED",
+        )
+        .order_by(BatchScoringRun.created_at.desc())
+        .first()
+    )
+    if run is None or not run.metadata_file:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay metadata para source_run={source_run} algorithm={algorithm}",
+        )
+
+    metadata_path = Path(run.metadata_file)
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail=f"metadata_file no existe: {run.metadata_file}")
+
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error leyendo metadata_file: {exc}")
+
+    return {
+        "source_run": source_run,
+        "algorithm": algorithm,
+        "batch_scoring_run_id": run.id,
+        "metadata_file": run.metadata_file,
+        "data": data,
+    }
