@@ -22,6 +22,40 @@ const MODEL_OPTIONS = [
   { value: 'gradient_boosting', label: 'Gradient Boosting' },
   { value: 'mlp_classifier', label: 'MLP Classifier' }
 ]
+const MODEL_LABELS = {
+  logistic_regression: 'Regresion logistica',
+  random_forest: 'Random Forest',
+  gradient_boosting: 'Gradient Boosting',
+  mlp_classifier: 'Red neuronal MLP',
+  mlp: 'Red neuronal MLP'
+}
+const MODEL_DESCRIPTIONS = {
+  logistic_regression: 'Modelo base e interpretable.',
+  random_forest: 'Modelo robusto basado en multiples arboles.',
+  gradient_boosting: 'Modelo secuencial que corrige errores progresivamente.',
+  mlp_classifier: 'Red neuronal. Requiere mas etiquetas para evitar sobreajuste.'
+}
+const METRIC_HELP = [
+  ['Accuracy', 'Porcentaje general de aciertos. No debe evaluarse sola.'],
+  ['Precision', 'De los casos que el modelo marco como positivos, cuantos eran CONFIRMED_FRAUD.'],
+  ['Recall', 'De los fraudes confirmados, cuantos logro detectar el modelo.'],
+  ['F1-score', 'Balance entre precision y recall.'],
+  ['ROC-AUC', 'Capacidad del modelo para separar alertas confirmadas y descartadas.']
+]
+const PREDICTION_LABELS = {
+  summary_alert_id: 'ID Alerta',
+  y_true: 'Etiqueta humana',
+  y_pred: 'Prediccion del modelo',
+  y_proba: 'Probabilidad estimada',
+  prediction_label: 'Resultado predicho',
+  evaluation_result: 'Evaluacion'
+}
+const EVALUATION_LABELS = {
+  TRUE_POSITIVE: 'Acierto positivo',
+  TRUE_NEGATIVE: 'Acierto negativo',
+  FALSE_POSITIVE: 'Falsa alarma',
+  FALSE_NEGATIVE: 'Fraude no detectado'
+}
 const FORBIDDEN_COLUMNS = new Set(['is_fraud', 'confirmed_fraud', 'PAN_TARJETA', 'TARJETA', 'pan_card', 'raw_card'])
 const METHODOLOGY_MESSAGE = 'El modelo supervisado fue entrenado con etiquetas humanas de revision. Sus predicciones apoyan la priorizacion analitica y no constituyen fraude confirmado automatico.'
 
@@ -129,27 +163,158 @@ function DataTable({ rows, emptyText = 'Sin datos disponibles.' }) {
   )
 }
 
+function MetricInfoCards() {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+      {METRIC_HELP.map(([title, text]) => (
+        <div key={title} className="card" style={{ margin: 0, padding: 14 }}>
+          <strong>{title}</strong>
+          <p style={{ color: 'var(--text-muted)', margin: '8px 0 0', fontSize: 13 }}>{text}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MiniBarChart({ title, data, metrics }) {
+  const colors = ['#38d6d6', '#27d17f', '#f7b955', '#8fb3ff', '#c084fc']
+  if (!data.length) return <div className="detail-status" style={{ padding: 12, borderRadius: 8 }}>No hay metricas para graficar.</div>
+  return (
+    <div className="card" style={{ margin: 0 }}>
+      <h4 style={{ marginTop: 0 }}>{title}</h4>
+      <div style={{ display: 'grid', gap: 14 }}>
+        {data.map((item) => (
+          <div key={item.model}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>{MODEL_LABELS[item.model] || item.model}</div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {metrics.map((metric, index) => {
+                const value = Math.max(0, Math.min(1, safeNumber(item[metric])))
+                return (
+                  <div key={metric} style={{ display: 'grid', gridTemplateColumns: '88px 1fr 58px', gap: 8, alignItems: 'center', fontSize: 12 }}>
+                    <span>{metric}</span>
+                    <div style={{ height: 10, background: 'rgba(36, 52, 71, 0.95)', borderRadius: 999, overflow: 'hidden' }}>
+                      <div aria-label={`${item.model} ${metric} ${formatMetric(value)}`} style={{ width: `${value * 100}%`, height: '100%', background: colors[index % colors.length] }} />
+                    </div>
+                    <strong>{formatMetric(value)}</strong>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ConfusionMatrix({ matrix }) {
   const safe = Array.isArray(matrix) ? matrix : [[0, 0], [0, 0]]
+  const maxValue = Math.max(1, ...safe.flat().map((value) => safeNumber(value)))
   const cells = [
-    ['Verdadero Negativo', safe?.[0]?.[0] ?? 0, 'success'],
-    ['Falso Positivo', safe?.[0]?.[1] ?? 0, 'warning'],
-    ['Falso Negativo', safe?.[1]?.[0] ?? 0, 'error'],
-    ['Verdadero Positivo', safe?.[1]?.[1] ?? 0, 'success']
+    ['Verdadero Negativo', safe?.[0]?.[0] ?? 0, 'Real: DISMISSED', 'Predicho: DISMISSED', 'El modelo descarto correctamente una alerta DISMISSED.', 'rgba(56, 214, 214, VALUE)'],
+    ['Falso Positivo', safe?.[0]?.[1] ?? 0, 'Real: DISMISSED', 'Predicho: CONFIRMED_FRAUD', 'El modelo priorizo una alerta que la revision humana descarto.', 'rgba(247, 185, 85, VALUE)'],
+    ['Falso Negativo', safe?.[1]?.[0] ?? 0, 'Real: CONFIRMED_FRAUD', 'Predicho: DISMISSED', 'El modelo descarto una alerta que la revision humana confirmo como fraude.', 'rgba(255, 107, 107, VALUE)'],
+    ['Verdadero Positivo', safe?.[1]?.[1] ?? 0, 'Real: CONFIRMED_FRAUD', 'Predicho: CONFIRMED_FRAUD', 'El modelo detecto una alerta que la revision humana confirmo como fraude.', 'rgba(39, 209, 127, VALUE)']
   ]
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(130px, 1fr))', gap: 10, maxWidth: 520 }}>
-        {cells.map(([label, value, tone]) => (
-          <div key={label} className="card" style={{ margin: 0, padding: 14 }}>
-            <StatusBadge tone={tone}>{label}</StatusBadge>
-            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 10 }}>{value}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '150px repeat(2, minmax(180px, 1fr))', gap: 8, alignItems: 'stretch', maxWidth: 760 }} aria-label="Matriz de confusion tipo heatmap">
+        <div />
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Predicho: DISMISSED</div>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Predicho: CONFIRMED_FRAUD</div>
+        <div style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Real: DISMISSED</div>
+        {cells.slice(0, 2).map(([label, value, real, predicted, description, color]) => (
+          <div key={label} style={{ padding: 16, borderRadius: 8, border: '1px solid rgba(255,255,255,0.10)', background: color.replace('VALUE', String(0.18 + (safeNumber(value) / maxValue) * 0.32)) }}>
+            <strong>{label}</strong>
+            <div style={{ fontSize: 34, fontWeight: 800, margin: '8px 0' }}>{value}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{real} / {predicted}</div>
+            <p style={{ margin: '8px 0 0', fontSize: 13 }}>{description}</p>
+          </div>
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>Real: CONFIRMED_FRAUD</div>
+        {cells.slice(2).map(([label, value, real, predicted, description, color]) => (
+          <div key={label} style={{ padding: 16, borderRadius: 8, border: '1px solid rgba(255,255,255,0.10)', background: color.replace('VALUE', String(0.18 + (safeNumber(value) / maxValue) * 0.32)) }}>
+            <strong>{label}</strong>
+            <div style={{ fontSize: 34, fontWeight: 800, margin: '8px 0' }}>{value}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{real} / {predicted}</div>
+            <p style={{ margin: '8px 0 0', fontSize: 13 }}>{description}</p>
           </div>
         ))}
       </div>
       <p style={{ color: 'var(--text-muted)' }}>
-        Formato [[TN, FP], [FN, TP]]. Falso positivo: el modelo priorizo como positivo una alerta DISMISSED. Falso negativo: el modelo descarto una alerta CONFIRMED_FRAUD.
+        Formato tecnico: [[TN, FP], [FN, TP]]. Este falso positivo es una metrica del modelo, no el estado manual FALSE_POSITIVE.
       </p>
+    </div>
+  )
+}
+
+function PredictionDistribution({ rows }) {
+  const safeRows = cleanRows(rows)
+  const positives = safeRows.filter((row) => Number(row.y_pred) === 1 || row.prediction_label === 'CONFIRMED_FRAUD').length
+  const negatives = safeRows.filter((row) => Number(row.y_pred) === 0 || row.prediction_label === 'DISMISSED').length
+  const total = Math.max(1, positives + negatives)
+  const ranges = [
+    ['0.0 - 0.2', 0, 0.2],
+    ['0.2 - 0.4', 0.2, 0.4],
+    ['0.4 - 0.6', 0.4, 0.6],
+    ['0.6 - 0.8', 0.6, 0.8],
+    ['0.8 - 1.0', 0.8, 1.01]
+  ].map(([label, min, max]) => ({
+    label,
+    count: safeRows.filter((row) => row.y_proba !== undefined && Number(row.y_proba) >= min && Number(row.y_proba) < max).length
+  }))
+  const hasProba = safeRows.some((row) => row.y_proba !== undefined && row.y_proba !== null && row.y_proba !== '')
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+      <div className="card" style={{ margin: 0 }}>
+        <h4 style={{ marginTop: 0 }}>Distribucion de predicciones</h4>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <ProgressLine label="Predicho DISMISSED" current={negatives} required={total} />
+          <ProgressLine label="Predicho CONFIRMED_FRAUD" current={positives} required={total} />
+        </div>
+      </div>
+      <div className="card" style={{ margin: 0 }}>
+        <h4 style={{ marginTop: 0 }}>Distribucion de probabilidad estimada</h4>
+        <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>Permite observar que tan seguros son los modelos en sus predicciones.</p>
+        {!hasProba && <div className="detail-status" style={{ padding: 10, borderRadius: 8 }}>Este modelo no expone probabilidad estimada.</div>}
+        {hasProba && ranges.map((item) => <ProgressLine key={item.label} label={item.label} current={item.count} required={safeRows.length} />)}
+      </div>
+    </div>
+  )
+}
+
+function FriendlyPredictionsTable({ rows, emptyText = 'No existen predicciones para este modelo.' }) {
+  const displayColumns = ['summary_alert_id', 'y_true', 'y_pred', 'y_proba', 'prediction_label', 'evaluation_result']
+  const safeRows = cleanRows(rows)
+  if (!safeRows.length) return <div className="detail-status" style={{ padding: 12, borderRadius: 8 }}>{emptyText}</div>
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="table">
+        <thead>
+          <tr>{displayColumns.map((column) => <th key={column}>{PREDICTION_LABELS[column]}</th>)}</tr>
+        </thead>
+        <tbody>
+          {safeRows.map((row, index) => (
+            <tr key={index}>
+              {displayColumns.map((column) => {
+                if (column === 'evaluation_result') {
+                  return (
+                    <td key={column}>
+                      <StatusBadge tone={String(row[column]).includes('FALSE') ? 'warning' : 'success'}>{EVALUATION_LABELS[row[column]] || row[column]}</StatusBadge>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{row[column]}</div>
+                    </td>
+                  )
+                }
+                if (column === 'y_true' || column === 'y_pred') {
+                  return <td key={column}>{Number(row[column]) === 1 ? 'CONFIRMED_FRAUD' : 'DISMISSED'} <span style={{ color: 'var(--text-muted)' }}>({row[column]})</span></td>
+                }
+                if (column === 'y_proba') return <td key={column}>{row[column] == null ? 'No disponible' : formatMetric(row[column])}</td>
+                return <td key={column}>{String(row[column] ?? '')}</td>
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -167,7 +332,7 @@ export default function ModelSupervised() {
   const [metadata, setMetadata] = useState(null)
   const [report, setReport] = useState('')
   const [predictions, setPredictions] = useState({ rows: [], page: 1, total_pages: 1, total: 0 })
-  const [predictionFilters, setPredictionFilters] = useState({ evaluation_result: '', y_true: '', y_pred: '', prediction_label: '' })
+  const [predictionFilters, setPredictionFilters] = useState({ quick_filter: '', evaluation_result: '', y_true: '', y_pred: '', prediction_label: '' })
   const [loading, setLoading] = useState({})
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -205,7 +370,7 @@ export default function ModelSupervised() {
     setLoading((prev) => ({ ...prev, details: true }))
     const params = { page, page_size: 20 }
     Object.entries(predictionFilters).forEach(([key, value]) => {
-      if (value !== '') params[key] = value
+      if (value !== '' && key !== 'quick_filter') params[key] = value
     })
     try {
       const [metadataPayload, reportPayload, predictionsPayload] = await Promise.all([
@@ -254,6 +419,31 @@ export default function ModelSupervised() {
   }, [trainingRuns])
 
   const selectedMetrics = metadata?.metrics || trainingRuns.find((item) => item.algorithm === selectedModel)?.metrics || {}
+  const selectedRun = trainingRuns.find((item) => item.algorithm === selectedModel)
+  const chartData = trainingRuns.map((run) => {
+    const runMetrics = run.metrics || run.metrics_json || {}
+    return {
+      model: run.algorithm,
+      Accuracy: safeNumber(runMetrics.accuracy),
+      Precision: safeNumber(runMetrics.precision),
+      Recall: safeNumber(runMetrics.recall),
+      'F1-score': safeNumber(runMetrics.f1_score),
+      'ROC-AUC': safeNumber(runMetrics.roc_auc)
+    }
+  })
+  const bestRecall = [...trainingRuns].sort((a, b) => safeNumber((b.metrics || b.metrics_json || {}).recall) - safeNumber((a.metrics || a.metrics_json || {}).recall))[0]
+  const bestPrecision = [...trainingRuns].sort((a, b) => safeNumber((b.metrics || b.metrics_json || {}).precision) - safeNumber((a.metrics || a.metrics_json || {}).precision))[0]
+  const visiblePredictionRows = useMemo(() => {
+    const rows = cleanRows(predictions.rows || [])
+    const filter = predictionFilters.quick_filter
+    if (filter === 'hits') return rows.filter((row) => String(row.evaluation_result).startsWith('TRUE'))
+    if (filter === 'errors') return rows.filter((row) => String(row.evaluation_result).startsWith('FALSE'))
+    if (filter === 'false_positive') return rows.filter((row) => row.evaluation_result === 'FALSE_POSITIVE')
+    if (filter === 'false_negative') return rows.filter((row) => row.evaluation_result === 'FALSE_NEGATIVE')
+    if (filter === 'predicted_positive') return rows.filter((row) => Number(row.y_pred) === 1 || row.prediction_label === 'CONFIRMED_FRAUD')
+    if (filter === 'predicted_negative') return rows.filter((row) => Number(row.y_pred) === 0 || row.prediction_label === 'DISMISSED')
+    return rows
+  }, [predictions.rows, predictionFilters.quick_filter])
 
   const handleBuildDataset = async () => {
     setLoading((prev) => ({ ...prev, datasetBuild: true }))
@@ -340,6 +530,23 @@ export default function ModelSupervised() {
       <div className="card warning-banner">
         Este modulo usa unicamente revisiones humanas. Las reglas, anomaly_flag, autoencoder_anomaly_flag y risk_score pueden ser senales analiticas, pero no etiquetas de fraude. CONFIRMED_FRAUD es clase positiva; DISMISSED es clase negativa; NEW, IN_REVIEW y FALSE_POSITIVE se excluyen del entrenamiento.
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+        <div className="card">
+          <h3>Que significa este modulo</h3>
+          <p>
+            El modelo supervisado aprende de revisiones humanas anteriores. Usa CONFIRMED_FRAUD como clase positiva y DISMISSED como clase negativa. Su salida es una prediccion de apoyo para priorizacion, no una confirmacion automatica de fraude.
+          </p>
+        </div>
+        <div className="card">
+          <h3>Que debe mirar primero el analista</h3>
+          <ul style={{ marginTop: 0, color: 'var(--text-muted)' }}>
+            <li>Recall: cuantos fraudes confirmados detecta.</li>
+            <li>Precision: cuantas falsas alarmas genera.</li>
+            <li>Falsos negativos: casos criticos que el modelo no detecto.</li>
+            <li>Falsos positivos: casos priorizados sin confirmacion humana.</li>
+          </ul>
+        </div>
+      </div>
 
       {error && <div className="detail-status detail-status-error" style={{ padding: 12, borderRadius: 8, marginBottom: 16 }}>{error}</div>}
       {notice && <div className="detail-status detail-status-success" style={{ padding: 12, borderRadius: 8, marginBottom: 16 }}>{notice}</div>}
@@ -395,6 +602,7 @@ export default function ModelSupervised() {
 
       <div className="card">
         <h3>Entrenar modelo supervisado</h3>
+        <p style={{ color: 'var(--text-muted)' }}>Seleccione un modelo y entrene con el dataset supervisado validado.</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
           <div className="form-row">
             <label htmlFor="supervised_model">Modelo</label>
@@ -414,6 +622,15 @@ export default function ModelSupervised() {
             <input type="checkbox" checked={modelConfig.use_smote} onChange={(event) => setModelConfig((prev) => ({ ...prev, use_smote: event.target.checked }))} />
             use_smote
           </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 14 }}>
+          {MODEL_OPTIONS.map((option) => (
+            <div key={option.value} className="card" style={{ margin: 0, padding: 12 }}>
+              <strong>{MODEL_LABELS[option.value]}</strong>
+              {option.value === 'mlp_classifier' && !recommendedReady && <div style={{ marginTop: 6 }}><StatusBadge tone="warning">Bloqueado hasta meta recomendada</StatusBadge></div>}
+              <p style={{ color: 'var(--text-muted)', margin: '8px 0 0', fontSize: 13 }}>{MODEL_DESCRIPTIONS[option.value]}</p>
+            </div>
+          ))}
         </div>
         {mlpBlocked && <div className="detail-status" style={{ padding: 12, borderRadius: 8, marginTop: 12 }}>MLP requiere meta recomendada de etiquetas humanas para evitar sobreajuste.</div>}
         {!technicalReady && <div className="detail-status" style={{ padding: 12, borderRadius: 8, marginTop: 12 }}>Requiere al menos 20 positivos y 20 negativos humanos.</div>}
@@ -448,9 +665,19 @@ export default function ModelSupervised() {
 
       <div className="card">
         <h3>Comparacion de modelos supervisados</h3>
-        {bestModel && <div style={{ marginBottom: 12 }}>Mejor modelo por F1-score: <strong>{bestModel.algorithm}</strong></div>}
+        <p style={{ color: 'var(--text-muted)' }}>Estas metricas comparan el comportamiento de cada modelo. En fraude financiero, precision y recall son mas importantes que accuracy por si sola.</p>
+        <MetricInfoCards />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginTop: 14 }}>
+          <MiniBarChart title="Precision, Recall y F1-score" data={chartData} metrics={['Precision', 'Recall', 'F1-score']} />
+          <MiniBarChart title="Accuracy y ROC-AUC" data={chartData} metrics={['Accuracy', 'ROC-AUC']} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '14px 0' }}>
+          {bestModel && <StatusBadge tone="success">Mayor F1-score: {MODEL_LABELS[bestModel.algorithm] || bestModel.algorithm}</StatusBadge>}
+          {bestRecall && <StatusBadge tone="neutral">Mayor recall: {MODEL_LABELS[bestRecall.algorithm] || bestRecall.algorithm}</StatusBadge>}
+          {bestPrecision && <StatusBadge tone="neutral">Mayor precision: {MODEL_LABELS[bestPrecision.algorithm] || bestPrecision.algorithm}</StatusBadge>}
+        </div>
         <div className="detail-status" style={{ padding: 12, borderRadius: 8, marginBottom: 12 }}>
-          Las metricas son preliminares porque el conjunto etiquetado actual corresponde al minimo tecnico. Recall alto reduce perdida de positivos confirmados; precision alta reduce alertas falsas para el analista. Accuracy no debe ser la unica metrica principal.
+          Las metricas son preliminares porque el dataset etiquetado actual cumple el minimo tecnico, pero aun no alcanza la meta recomendada.
         </div>
         <DataTable rows={trainingRuns.map((run) => {
           const matrix = run.metrics?.confusion_matrix || run.metrics_json?.confusion_matrix || [[0, 0], [0, 0]]
@@ -468,31 +695,40 @@ export default function ModelSupervised() {
       </div>
 
       <div className="card">
-        <h3>Matriz de confusion</h3>
+        <h3>Resultado del modelo seleccionado</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+          <KPICard title="Modelo" value={MODEL_LABELS[selectedModel] || selectedModel} />
+          <KPICard title="Estado" value={selectedRun?.status || metadata?.status || 'No disponible'} />
+          <KPICard title="Filas usadas" value={formatCount(metadata?.total_rows)} />
+          <KPICard title="Positivos / negativos" value={`${formatCount(metadata?.positive_count)} / ${formatCount(metadata?.negative_count)}`} />
+          <KPICard title="Test size" value={formatMetric(metadata?.test_size)} />
+          <KPICard title="Fecha entrenamiento" value={metadata?.created_at || selectedRun?.created_at || 'No disponible'} />
+        </div>
+        <MetricInfoCards />
+      </div>
+
+      <div className="card">
+        <h3>Matriz de confusion visual</h3>
         <ConfusionMatrix matrix={selectedMetrics?.confusion_matrix} />
       </div>
 
       <div className="card">
-        <h3>Reporte del modelo</h3>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <button className="button button-secondary" onClick={() => loadModelDetails(selectedModel, predictions.page || 1)}>Refrescar</button>
-          <button className="button button-secondary" onClick={copyReport} disabled={!report}>Copiar contenido</button>
-        </div>
-        <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(4, 12, 22, 0.45)', padding: 14, borderRadius: 8, maxHeight: 360, overflow: 'auto' }}>
-          {report || 'No existe reporte para este modelo.'}
-        </pre>
-      </div>
-
-      <div className="card">
-        <h3>Metadata del modelo</h3>
-        <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(4, 12, 22, 0.45)', padding: 14, borderRadius: 8, maxHeight: 420, overflow: 'auto' }}>
-          {metadata ? JSON.stringify({ ...metadata, use_smote: metadata.use_smote ?? modelConfig.use_smote }, null, 2) : 'No existe metadata para este modelo.'}
-        </pre>
+        <h3>Distribucion de predicciones</h3>
+        <PredictionDistribution rows={visiblePredictionRows} />
       </div>
 
       <div className="card">
         <h3>Predicciones de evaluacion</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <select className="input" aria-label="filtro rapido" value={predictionFilters.quick_filter} onChange={(event) => setPredictionFilters((prev) => ({ ...prev, quick_filter: event.target.value }))}>
+            <option value="">Todos</option>
+            <option value="hits">Aciertos</option>
+            <option value="errors">Errores</option>
+            <option value="false_positive">Falsos positivos</option>
+            <option value="false_negative">Falsos negativos</option>
+            <option value="predicted_positive">Predichos positivos</option>
+            <option value="predicted_negative">Predichos negativos</option>
+          </select>
           <select className="input" aria-label="evaluation_result" value={predictionFilters.evaluation_result} onChange={(event) => setPredictionFilters((prev) => ({ ...prev, evaluation_result: event.target.value }))}>
             <option value="">Todos los resultados</option>
             <option value="TRUE_POSITIVE">TRUE_POSITIVE</option>
@@ -517,12 +753,41 @@ export default function ModelSupervised() {
           </select>
           <button className="button button-secondary" onClick={() => loadModelDetails(selectedModel, 1)}>Aplicar filtros</button>
         </div>
-        <DataTable rows={predictions.rows || []} emptyText="No existen predicciones para este modelo." />
+        <FriendlyPredictionsTable rows={visiblePredictionRows} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
           <button className="button button-secondary" disabled={(predictions.page || 1) <= 1} onClick={() => loadModelDetails(selectedModel, (predictions.page || 1) - 1)}>Anterior</button>
           <span>Pagina {predictions.page || 1} de {predictions.total_pages || 1}</span>
           <button className="button button-secondary" disabled={(predictions.page || 1) >= (predictions.total_pages || 1)} onClick={() => loadModelDetails(selectedModel, (predictions.page || 1) + 1)}>Siguiente</button>
         </div>
+      </div>
+
+      <div className="card">
+        <h3>Detalles tecnicos</h3>
+        <details>
+          <summary>Ver reporte tecnico</summary>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '12px 0' }}>
+            <button className="button button-secondary" onClick={() => loadModelDetails(selectedModel, predictions.page || 1)}>Refrescar</button>
+            <button className="button button-secondary" onClick={copyReport} disabled={!report}>Copiar contenido</button>
+          </div>
+          <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(4, 12, 22, 0.45)', padding: 14, borderRadius: 8, maxHeight: 360, overflow: 'auto' }}>
+            {report || 'No existe reporte para este modelo.'}
+          </pre>
+        </details>
+        <details style={{ marginTop: 12 }}>
+          <summary>Ver metadata del modelo</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(4, 12, 22, 0.45)', padding: 14, borderRadius: 8, maxHeight: 420, overflow: 'auto' }}>
+            {metadata ? JSON.stringify({ ...metadata, use_smote: metadata.use_smote ?? modelConfig.use_smote }, null, 2) : 'No existe metadata para este modelo.'}
+          </pre>
+        </details>
+        <details style={{ marginTop: 12 }}>
+          <summary>Ver archivos generados</summary>
+          <DataTable rows={metadata ? [{
+            model_file: metadata.model_file,
+            metadata_file: metadata.metadata_file,
+            report_file: metadata.report_file,
+            predictions_file: metadata.predictions_file
+          }] : []} emptyText="No hay archivos registrados para este modelo." />
+        </details>
       </div>
 
       <div className="card">
