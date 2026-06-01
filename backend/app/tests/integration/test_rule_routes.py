@@ -577,7 +577,7 @@ def test_rule_routes_endpoints(monkeypatch, test_client, tmp_path):
     assert summary_json["total_items"] == 3
     assert len(summary_json["items"]) == 1
     assert summary_json["page_size"] == 1
-    assert summary_json["items"][0]["merchant_rubro_proxy"] == "5411"
+    assert summary_json["items"][0]["merchant_rubro_proxy"] == "5944"
     assert "transaction_date" in summary_json["items"][0]
     assert "is_fraud" not in summary_response.text
     assert "confirmed_fraud" not in summary_response.text

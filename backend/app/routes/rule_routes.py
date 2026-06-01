@@ -1236,7 +1236,7 @@ def _sort_by_transaction_date(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
     result["_transaction_sort_date"] = pd.to_datetime(result[date_column], errors="coerce", utc=True)
     sort_columns = ["_transaction_sort_date"]
-    ascending = [False]
+    ascending = [True]
     if "summary_alert_id" in result.columns:
         sort_columns.append("summary_alert_id")
         ascending.append(True)
