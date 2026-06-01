@@ -364,6 +364,134 @@ button, input, select, textarea {
 	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.field-help {
+	margin-top: 6px;
+	color: var(--text-muted);
+	font-size: 0.82rem;
+	line-height: 1.45;
+}
+
+.compact-list {
+	margin: 10px 0 0;
+	padding-left: 18px;
+	color: var(--text-soft);
+	line-height: 1.6;
+}
+
+.guide-card h4 {
+	margin-top: 0;
+}
+
+.chart-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 14px;
+	margin-bottom: 18px;
+}
+
+.chart-panel {
+	margin-bottom: 0 !important;
+}
+
+.simple-bar-chart {
+	display: grid;
+	gap: 10px;
+	margin-top: 12px;
+}
+
+.simple-bar-row {
+	display: grid;
+	grid-template-columns: minmax(54px, 86px) minmax(120px, 1fr) minmax(48px, auto);
+	align-items: center;
+	gap: 10px;
+	font-size: 0.82rem;
+}
+
+.simple-bar-label,
+.simple-bar-value {
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.simple-bar-track {
+	height: 10px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	overflow: hidden;
+}
+
+.simple-bar-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+}
+
+.donut-layout {
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	margin-top: 12px;
+}
+
+.donut-chart {
+	width: 116px;
+	height: 116px;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	position: relative;
+	flex: 0 0 auto;
+}
+
+.donut-chart::after {
+	content: '';
+	position: absolute;
+	width: 74px;
+	height: 74px;
+	border-radius: 50%;
+	background: #0d1725;
+}
+
+.donut-chart span {
+	position: relative;
+	z-index: 1;
+	font-weight: 800;
+	color: var(--text-main);
+}
+
+.chart-legend {
+	display: grid;
+	gap: 8px;
+	color: var(--text-soft);
+}
+
+.legend-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	margin-right: 8px;
+}
+
+.anomaly-dot {
+	background: #f7b955;
+}
+
+.normal-dot {
+	background: #2d8cff;
+}
+
+.technical-details summary {
+	cursor: pointer;
+	font-weight: 800;
+	color: var(--text-main);
+}
+
+.technical-details summary::-webkit-details-marker {
+	color: var(--accent-cyan);
+}
+
 .action-row,
 .pagination-bar,
 .modal-header {

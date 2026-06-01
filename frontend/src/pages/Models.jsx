@@ -40,6 +40,28 @@ const DEFAULT_FILTERS = {
 
 const FORBIDDEN_DISPLAY_TOKENS = ['is_fraud', 'confirmed_fraud', 'PAN_TARJETA', 'TARJETA', 'pan_card', 'raw_card']
 
+const MODEL_HELP = {
+  isolation_forest: 'Este modelo detecta registros difíciles de agrupar con el comportamiento general.',
+  autoencoder_pytorch: 'Este modelo detecta registros que no logra reconstruir correctamente.',
+}
+
+const PARAM_HELP = {
+  isolation_forest: {
+    contamination: 'Porcentaje aproximado de transacciones que el modelo marcará como anómalas.',
+    n_estimators: 'Cantidad de árboles usados.',
+    max_categories: 'Límite de categorías para variables categóricas.',
+    sample_size: 'Opcional. Reduce el tamaño para pruebas rápidas.',
+  },
+  autoencoder_pytorch: {
+    contamination: 'Porcentaje aproximado de registros marcados como anómalos.',
+    epochs: 'Cantidad de pasadas de entrenamiento.',
+    batch_size: 'Registros procesados por bloque.',
+    latent_dim: 'Tamaño de la representación comprimida.',
+    learning_rate: 'Velocidad de aprendizaje.',
+    sample_size: 'Opcional. Reduce el tamaño para pruebas rápidas.',
+  },
+}
+
 function extractErrorMessage(error, fallback) {
   return error?.response?.data?.detail || error?.message || fallback
 }
@@ -81,7 +103,7 @@ function formatMaybeDate(value) {
 
 function dependencyMessage(status) {
   if (status === 'AUTOENCODER_DEPENDENCY_NOT_AVAILABLE') {
-    return 'PyTorch no está disponible en el entorno actual. Instale o habilite PyTorch para entrenar el Autoencoder.'
+    return 'PyTorch no está disponible. Puede seguir usando Isolation Forest o instalar PyTorch para habilitar Autoencoder.'
   }
   return ''
 }
@@ -135,6 +157,73 @@ function KeyValueGrid({ title, items }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function FieldHelp({ children }) {
+  return <div className="field-help">{children}</div>
+}
+
+function ModelMethodCard({ title, items }) {
+  return (
+    <div className="metadata-item guide-card">
+      <h4>{title}</h4>
+      <ul className="compact-list">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </div>
+  )
+}
+
+function SimpleBarChart({ title, items, emptyText }) {
+  const maxValue = Math.max(...items.map((item) => Number(item.value) || 0), 0)
+  return (
+    <div className="card detail-section chart-panel">
+      <h4>{title}</h4>
+      {items.length > 0 && maxValue > 0 ? (
+        <div className="simple-bar-chart">
+          {items.map((item) => {
+            const width = Math.max(4, Math.round(((Number(item.value) || 0) / maxValue) * 100))
+            return (
+              <div className="simple-bar-row" key={item.label}>
+                <span className="simple-bar-label">{item.label}</span>
+                <div className="simple-bar-track">
+                  <span className="simple-bar-fill" style={{ width: `${width}%` }} />
+                </div>
+                <span className="simple-bar-value">{item.displayValue}</span>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="empty-state">{emptyText}</div>
+      )}
+    </div>
+  )
+}
+
+function ResultDistributionChart({ anomalous, normal }) {
+  const safeAnomalous = Math.max(Number(anomalous) || 0, 0)
+  const safeNormal = Math.max(Number(normal) || 0, 0)
+  const total = safeAnomalous + safeNormal
+  const anomalyPercent = total > 0 ? (safeAnomalous / total) * 100 : 0
+  return (
+    <div className="card detail-section chart-panel">
+      <h4>Distribución de resultados</h4>
+      {total > 0 ? (
+        <div className="donut-layout">
+          <div className="donut-chart" style={{ background: `conic-gradient(#f7b955 0 ${anomalyPercent}%, #2d8cff ${anomalyPercent}% 100%)` }}>
+            <span>{anomalyPercent.toFixed(2)}%</span>
+          </div>
+          <div className="chart-legend">
+            <div><span className="legend-dot anomaly-dot" />Anómalas: {formatNumber(safeAnomalous)}</div>
+            <div><span className="legend-dot normal-dot" />No anómalas: {formatNumber(safeNormal)}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="empty-state">No hay suficientes datos para construir este gráfico.</div>
+      )}
     </div>
   )
 }
@@ -245,7 +334,7 @@ export default function Models() {
       setScoresPayload(response)
     } catch (error) {
       setScoresPayload({ run_id: runId, page: currentPage, page_size: currentPageSize, total_items: 0, total_pages: 0, items: [] })
-      setScoresError(extractErrorMessage(error, 'No fue posible cargar las anomalías.'))
+      setScoresError(extractErrorMessage(error, 'No se pudieron cargar los resultados. Verifique que el backend esté activo y que existan artefactos para este run.'))
     } finally {
       setScoresLoading(false)
     }
@@ -325,50 +414,50 @@ export default function Models() {
   }, [selectedRunId, selectedAlgorithm, selectedSourceRun, page, pageSize, normalizedScoreFilters])
 
   const anomalyColumns = [
-    { key: 'anomaly_rank', title: 'anomaly_rank' },
-    { key: 'transaction_id', title: 'transaction_id' },
-    { key: 'customer_hash', title: 'customer_hash' },
-    { key: 'transaction_datetime', title: 'transaction_datetime' },
-    { key: 'amount', title: 'amount' },
-    { key: 'country_code', title: 'country_code' },
+    { key: 'anomaly_rank', title: 'Prioridad' },
+    { key: 'transaction_id', title: 'ID Transacción' },
+    { key: 'customer_hash', title: 'Cliente anonimizado' },
+    { key: 'transaction_datetime', title: 'Fecha/Hora' },
+    { key: 'amount', title: 'Monto' },
+    { key: 'country_code', title: 'País' },
     { key: 'pos_entry_mode', title: 'pos_entry_mode' },
     { key: 'has_pinblock', title: 'has_pinblock' },
-    { key: 'merchant_rubro_proxy', title: 'merchant_rubro_proxy' },
-    { key: 'anomaly_score', title: 'anomaly_score' },
+    { key: 'merchant_rubro_proxy', title: 'MCC/Rubro' },
+    { key: 'anomaly_score', title: 'Score de anomalía' },
     { key: 'anomaly_percentile', title: 'anomaly_percentile' },
-    { key: 'anomaly_flag', title: 'anomaly_flag' },
+    { key: 'anomaly_flag', title: 'Marcada como anomalía' },
     { key: 'anomaly_model_name', title: 'anomaly_model_name' },
     { key: '__actions', title: 'Acción' },
   ]
 
   const autoencoderColumns = [
-    { key: 'anomaly_rank', title: 'anomaly_rank' },
-    { key: 'transaction_id', title: 'transaction_id' },
-    { key: 'customer_hash', title: 'customer_hash' },
-    { key: 'transaction_datetime', title: 'transaction_datetime' },
-    { key: 'amount', title: 'amount' },
-    { key: 'country_code', title: 'country_code' },
+    { key: 'anomaly_rank', title: 'Prioridad' },
+    { key: 'transaction_id', title: 'ID Transacción' },
+    { key: 'customer_hash', title: 'Cliente anonimizado' },
+    { key: 'transaction_datetime', title: 'Fecha/Hora' },
+    { key: 'amount', title: 'Monto' },
+    { key: 'country_code', title: 'País' },
     { key: 'pos_entry_mode', title: 'pos_entry_mode' },
     { key: 'has_pinblock', title: 'has_pinblock' },
-    { key: 'merchant_rubro_proxy', title: 'merchant_rubro_proxy' },
-    { key: 'anomaly_score', title: 'reconstruction_error' },
-    { key: 'anomaly_percentile', title: 'autoencoder_anomaly_score' },
-    { key: 'anomaly_flag', title: 'autoencoder_anomaly_flag' },
+    { key: 'merchant_rubro_proxy', title: 'MCC/Rubro' },
+    { key: 'anomaly_score', title: 'Error de reconstrucción' },
+    { key: 'anomaly_percentile', title: 'Score Autoencoder' },
+    { key: 'anomaly_flag', title: 'Marcada como anomalía' },
     { key: 'anomaly_model_name', title: 'algorithm' },
-    { key: '__actions', title: 'Accion' },
+    { key: '__actions', title: 'Acción' },
   ]
 
   const activeScoreColumns = isAutoencoder ? autoencoderColumns : anomalyColumns
 
   const topColumns = [
-    { key: 'anomaly_rank', title: 'Rank' },
-    { key: 'transaction_id', title: 'transaction_id' },
-    { key: 'customer_hash', title: 'customer_hash' },
-    { key: 'amount', title: 'amount' },
-    { key: 'country_code', title: 'country_code' },
+    { key: 'anomaly_rank', title: 'Prioridad' },
+    { key: 'transaction_id', title: 'ID Transacción' },
+    { key: 'customer_hash', title: 'Cliente anonimizado' },
+    { key: 'amount', title: 'Monto' },
+    { key: 'country_code', title: 'País' },
     { key: 'pos_entry_mode', title: 'pos_entry_mode' },
-    { key: 'merchant_rubro_proxy', title: 'merchant_rubro_proxy' },
-    { key: 'anomaly_score', title: 'anomaly_score' },
+    { key: 'merchant_rubro_proxy', title: 'MCC/Rubro' },
+    { key: 'anomaly_score', title: 'Score de anomalía' },
     { key: 'anomaly_percentile', title: 'anomaly_percentile' },
   ]
 
@@ -403,13 +492,17 @@ export default function Models() {
   const metricHighlights = useMemo(() => {
     if (isAutoencoder) {
       return [
-        { label: 'Total de registros', value: formatNumber(metrics?.total_records ?? metrics?.total_transactions) },
-        { label: 'Total de anomalÃ­as', value: formatNumber(metrics?.anomaly_count) },
-        { label: 'Porcentaje de anomalÃ­as', value: formatPercent(metrics?.anomaly_rate), highlight: true },
-        { label: 'Contamination', value: metrics?.contamination ?? 'N/A' },
-        { label: 'Threshold de reconstrucciÃ³n', value: metrics?.threshold !== undefined && metrics?.threshold !== null ? Number(metrics.threshold).toFixed(6) : 'N/A' },
-        { label: 'Algoritmo', value: 'Autoencoder PyTorch' },
+        { label: 'Modelo', value: 'Autoencoder PyTorch' },
         { label: 'Run', value: metrics?.source_run || selectedSourceRun || 'N/A' },
+        { label: 'Registros evaluados', value: formatNumber(metrics?.total_records ?? metrics?.total_transactions) },
+        { label: 'Anomalías detectadas', value: formatNumber(metrics?.anomaly_count) },
+        { label: 'Tasa de anomalías', value: formatPercent(metrics?.anomaly_rate), highlight: true },
+        { label: 'Parámetro contamination', value: metrics?.contamination ?? 'N/A' },
+        { label: 'Fecha de entrenamiento', value: formatMaybeDate(metadata?.created_at || metrics?.created_at) },
+        { label: 'Archivo de scores', value: metadata?.scores_file || metadata?.score_file || 'N/A' },
+        { label: 'Threshold de reconstrucción', value: metrics?.threshold !== undefined && metrics?.threshold !== null ? Number(metrics.threshold).toFixed(6) : 'N/A' },
+        { label: 'Error promedio', value: metrics?.mean_reconstruction_error !== undefined ? Number(metrics.mean_reconstruction_error).toFixed(6) : 'N/A' },
+        { label: 'Error máximo', value: metrics?.max_reconstruction_error !== undefined ? Number(metrics.max_reconstruction_error).toFixed(6) : 'N/A' },
         { label: 'epochs', value: metadata?.epochs ?? 'N/A' },
         { label: 'batch_size', value: metadata?.batch_size ?? 'N/A' },
         { label: 'latent_dim', value: metadata?.latent_dim ?? 'N/A' },
@@ -420,17 +513,62 @@ export default function Models() {
     const mccTop = topEntry(metrics?.anomalies_by_mcc)
     const posTop = topEntry(metrics?.anomalies_by_pos_entry_mode)
     return [
-      { label: 'Total de transacciones', value: formatNumber(metrics?.total_transactions) },
-      { label: 'Total de anomalías', value: formatNumber(metrics?.anomaly_count) },
-      { label: 'Porcentaje de anomalías', value: formatPercent(metrics?.anomaly_rate), highlight: true },
-      { label: 'Modelo', value: metrics?.model_name || 'N/A' },
-      { label: 'Algoritmo', value: metrics?.algorithm || 'N/A' },
-      { label: 'Contamination', value: metrics?.contamination ?? 'N/A' },
+      { label: 'Modelo', value: 'Isolation Forest' },
+      { label: 'Run', value: metrics?.run_id || selectedRunId || 'N/A' },
+      { label: 'Registros evaluados', value: formatNumber(metrics?.total_transactions ?? metadata?.total_rows) },
+      { label: 'Anomalías detectadas', value: formatNumber(metrics?.anomaly_count) },
+      { label: 'Tasa de anomalías', value: formatPercent(metrics?.anomaly_rate), highlight: true },
+      { label: 'Parámetro contamination', value: metrics?.contamination ?? 'N/A' },
+      { label: 'Fecha de entrenamiento', value: formatMaybeDate(metadata?.created_at || selectedRun?.created_at) },
+      { label: 'Archivo de scores', value: metadata?.score_file || metadata?.scores_file || 'N/A' },
+      { label: 'n_estimators', value: metadata?.n_estimators ?? 'N/A' },
+      { label: 'Score promedio', value: metrics?.mean_anomaly_score !== undefined ? Number(metrics.mean_anomaly_score).toFixed(6) : 'N/A' },
       { label: 'País con más anomalías', value: countryTop ? `${countryTop[0]} (${countryTop[1]})` : 'N/A' },
       { label: 'MCC con más anomalías', value: mccTop ? `${mccTop[0]} (${mccTop[1]})` : 'N/A' },
       { label: 'POS Entry Mode más frecuente', value: posTop ? `${posTop[0]} (${posTop[1]})` : 'N/A' },
     ]
-  }, [metrics, metadata, isAutoencoder, selectedSourceRun])
+  }, [metrics, metadata, isAutoencoder, selectedSourceRun, selectedRun, selectedRunId])
+
+  const chartSourceRows = useMemo(() => {
+    const source = isAutoencoder ? scoresPayload.items : (topAnomalies.length ? topAnomalies : scoresPayload.items)
+    return source.slice(0, 10).map((item, index) => {
+      const value = isAutoencoder ? item.reconstruction_error : item.anomaly_score
+      const label = item.anomaly_rank ? `#${item.anomaly_rank}` : (item.transaction_id || `Fila ${index + 1}`).slice(0, 12)
+      return {
+        label,
+        value: Number(value) || 0,
+        displayValue: value !== null && value !== undefined ? Number(value).toFixed(6) : 'N/A',
+      }
+    })
+  }, [isAutoencoder, scoresPayload.items, topAnomalies])
+
+  const resultDistribution = useMemo(() => {
+    const total = Number(metrics?.total_records ?? metrics?.total_transactions ?? scoresPayload.total_items) || 0
+    const anomalous = Number(metrics?.anomaly_count) || (scoresPayload.items || []).filter((item) => Number(isAutoencoder ? item.autoencoder_anomaly_flag : item.anomaly_flag) === 1).length
+    return { anomalous, normal: Math.max(total - anomalous, 0) }
+  }, [metrics, scoresPayload.items, scoresPayload.total_items, isAutoencoder])
+
+  const scoreHistogram = useMemo(() => {
+    const values = (scoresPayload.items || [])
+      .map((item) => Number(isAutoencoder ? item.reconstruction_error : item.anomaly_score))
+      .filter((value) => Number.isFinite(value))
+    if (values.length < 2) return []
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    if (min === max) return [{ label: `${min.toFixed(3)}`, value: values.length, displayValue: formatNumber(values.length) }]
+    const bucketCount = 5
+    const bucketSize = (max - min) / bucketCount
+    return Array.from({ length: bucketCount }, (_, index) => {
+      const start = min + bucketSize * index
+      const end = index === bucketCount - 1 ? max : start + bucketSize
+      const count = values.filter((value) => value >= start && (index === bucketCount - 1 ? value <= end : value < end)).length
+      return {
+        label: `${start.toFixed(3)}-${end.toFixed(3)}`,
+        value: count,
+        displayValue: formatNumber(count),
+      }
+    })
+  }, [scoresPayload.items, isAutoencoder])
 
   const metadataItems = useMemo(() => {
     if (!metadata) return []
@@ -589,7 +727,7 @@ export default function Models() {
     if (scoresLoading) return 'Cargando anomalías...'
     if (scoresError) return scoresError
     if ((scoresPayload.items || []).length === 0 && scoresPayload.total_items === 0) {
-      return 'No hay anomalías que coincidan con los filtros seleccionados.'
+      return 'No existen resultados generados para este modelo y run. Ejecute el entrenamiento para crear scores.'
     }
     return 'No existen ejecuciones de anomalías todavía. Ejecute primero el entrenamiento no supervisado.'
   }
@@ -598,8 +736,9 @@ export default function Models() {
     <div className="models-page">
       <div className="header">
         <div>
-          <h2>No Supervisados</h2>
-          <div className="page-subtitle">Entrenamiento y consulta de modelos no supervisados para detección de anomalías.</div>
+          <h2>Modelos No Supervisados</h2>
+          <div className="page-subtitle">Detectan comportamientos atípicos sin usar etiquetas humanas.</div>
+          <p className="section-help">Estos modelos analizan patrones transaccionales y marcan operaciones que se alejan del comportamiento general. Una anomalía no significa fraude confirmado.</p>
         </div>
         <div className="header-actions">
           <span className="warning-badge">Las anomalías no representan fraude confirmado</span>
@@ -608,6 +747,29 @@ export default function Models() {
 
       <div className="card warning-banner">
         Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.
+      </div>
+
+      <div className="card detail-section">
+        <h3>¿Cómo funcionan estos modelos?</h3>
+        <div className="metadata-grid">
+          <ModelMethodCard
+            title="Isolation Forest"
+            items={[
+              'Busca transacciones que se aíslan fácilmente del resto.',
+              'Es útil para detectar operaciones estadísticamente raras.',
+              'Resultado principal: score de anomalía y prioridad.',
+            ]}
+          />
+          <ModelMethodCard
+            title="Autoencoder PyTorch"
+            items={[
+              'Aprende a reconstruir transacciones normales.',
+              'Si una transacción tiene alto error de reconstrucción, se considera atípica.',
+              'Resultado principal: error de reconstrucción.',
+            ]}
+          />
+        </div>
+        <div className="status-banner status-info">Ambos modelos son complementarios. Pueden señalar casos distintos.</div>
       </div>
 
       <div className="card detail-section">
@@ -630,6 +792,7 @@ export default function Models() {
                 <option value="isolation_forest">Isolation Forest</option>
                 <option value="autoencoder_pytorch">Autoencoder PyTorch</option>
               </select>
+              <FieldHelp>{MODEL_HELP[selectedAlgorithm]}</FieldHelp>
             </div>
             <div className="form-row">
               <label htmlFor="source_run">source_run</label>
@@ -638,16 +801,19 @@ export default function Models() {
             <div className="form-row">
               <label htmlFor="contamination">contamination</label>
               <input id="contamination" className="input" type="number" step="0.001" min="0.001" max="0.5" value={trainingForm.contamination} onChange={(e) => updateTrainingField('contamination', e.target.value)} />
+              <FieldHelp>{PARAM_HELP[selectedAlgorithm].contamination}</FieldHelp>
             </div>
             {!isAutoencoder && (
               <>
                 <div className="form-row">
                   <label htmlFor="n_estimators">n_estimators</label>
                   <input id="n_estimators" className="input" type="number" min="1" value={trainingForm.n_estimators} onChange={(e) => updateTrainingField('n_estimators', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.isolation_forest.n_estimators}</FieldHelp>
                 </div>
                 <div className="form-row">
                   <label htmlFor="max_categories">max_categories</label>
                   <input id="max_categories" className="input" type="number" min="1" value={trainingForm.max_categories} onChange={(e) => updateTrainingField('max_categories', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.isolation_forest.max_categories}</FieldHelp>
                 </div>
               </>
             )}
@@ -656,26 +822,32 @@ export default function Models() {
                 <div className="form-row">
                   <label htmlFor="epochs">epochs</label>
                   <input id="epochs" className="input" type="number" min="1" value={trainingForm.epochs} onChange={(e) => updateTrainingField('epochs', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.autoencoder_pytorch.epochs}</FieldHelp>
                 </div>
                 <div className="form-row">
                   <label htmlFor="batch_size">batch_size</label>
                   <input id="batch_size" className="input" type="number" min="1" value={trainingForm.batch_size} onChange={(e) => updateTrainingField('batch_size', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.autoencoder_pytorch.batch_size}</FieldHelp>
                 </div>
                 <div className="form-row">
                   <label htmlFor="latent_dim">latent_dim</label>
                   <input id="latent_dim" className="input" type="number" min="1" value={trainingForm.latent_dim} onChange={(e) => updateTrainingField('latent_dim', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.autoencoder_pytorch.latent_dim}</FieldHelp>
                 </div>
                 <div className="form-row">
                   <label htmlFor="learning_rate">learning_rate</label>
                   <input id="learning_rate" className="input" type="number" min="0.000001" step="0.000001" value={trainingForm.learning_rate} onChange={(e) => updateTrainingField('learning_rate', e.target.value)} />
+                  <FieldHelp>{PARAM_HELP.autoencoder_pytorch.learning_rate}</FieldHelp>
                 </div>
               </>
             )}
             <div className="form-row">
               <label htmlFor="sample_size">sample_size (opcional)</label>
               <input id="sample_size" className="input" type="number" min="1" placeholder="Vacío para no limitar" value={trainingForm.sample_size} onChange={(e) => updateTrainingField('sample_size', e.target.value)} />
+              <FieldHelp>{PARAM_HELP[selectedAlgorithm].sample_size}</FieldHelp>
             </div>
           </div>
+          <div className="status-banner status-info">Recomendación inicial: contamination = 0.01 para revisar aproximadamente el 1 % más atípico.</div>
           <div className="action-row">
             <button className="button" type="submit" disabled={trainingRunning}>
               {trainingRunning ? 'Ejecutando entrenamiento...' : 'Ejecutar entrenamiento'}
@@ -737,7 +909,7 @@ export default function Models() {
       </div>
 
       <div className="card detail-section">
-        <h3>Métricas generales</h3>
+        <h3>Resumen visual del entrenamiento</h3>
         {metricsLoading ? (
           <div className="empty-state">Cargando métricas...</div>
         ) : metricsError ? (
@@ -749,6 +921,35 @@ export default function Models() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="card detail-section">
+        <h3>Cómo interpretar los resultados</h3>
+        <p className="section-help">Una anomalía es un comportamiento diferente al patrón general. Puede deberse a fraude, pero también a una operación legítima poco frecuente. Por eso debe revisarse junto con reglas, contexto del cliente y revisión humana.</p>
+        <div className="metadata-grid">
+          <div className="metadata-item">
+            <div className="metric-label">Isolation Forest</div>
+            <div className="metadata-value">Un score/rank alto indica que la transacción se separa estadísticamente del resto.</div>
+          </div>
+          <div className="metadata-item">
+            <div className="metric-label">Autoencoder PyTorch</div>
+            <div className="metadata-value">Un error de reconstrucción alto indica que el modelo tuvo dificultad para representar esa transacción como normal.</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="chart-grid">
+        <SimpleBarChart
+          title="Top anomalías por score"
+          items={chartSourceRows}
+          emptyText="No hay suficientes datos para construir este gráfico."
+        />
+        <ResultDistributionChart anomalous={resultDistribution.anomalous} normal={resultDistribution.normal} />
+        <SimpleBarChart
+          title="Distribución de scores"
+          items={scoreHistogram}
+          emptyText="No hay suficientes datos para construir este gráfico."
+        />
       </div>
 
       <div className="card detail-section">
@@ -769,6 +970,7 @@ export default function Models() {
       <div className="card detail-section">
         <h3>Tabla de anomalías</h3>
         <p className="section-help">Los resultados se cargan paginados. No se descarga el CSV completo en la UI.</p>
+        <p className="section-help">Prioridad 1 representa el caso más atípico dentro del run.</p>
         <form className="filters-panel" onSubmit={handleApplyFilters}>
           <div className="filters-grid">
             <div className="form-row checkbox-row">
@@ -890,44 +1092,56 @@ export default function Models() {
       </div>
 
       <div className="card detail-section">
-        <h3>Reporte de anomalías</h3>
-        <div className="action-row">
-          <button className="button button-secondary" type="button" onClick={handleCopyReport} disabled={!report}>Copiar reporte</button>
-          {copyState && <div className="inline-message">{copyState}</div>}
-        </div>
-        {reportLoading ? (
-          <div className="empty-state">Cargando reporte...</div>
-        ) : reportError ? (
-          <div className="status-banner status-error">{reportError}</div>
-        ) : safeReport ? (
-          <pre className="report-pre report-box">{safeReport}</pre>
-        ) : (
-          <div className="empty-state">No hay reporte disponible para la ejecución seleccionada.</div>
-        )}
+        <details className="technical-details">
+          <summary>Reporte técnico</summary>
+          <p className="section-help">Reporte completo para auditoría y trazabilidad del entrenamiento.</p>
+          <div className="action-row">
+            <button className="button button-secondary" type="button" onClick={handleCopyReport} disabled={!report}>Copiar reporte</button>
+            {copyState && <div className="inline-message">{copyState}</div>}
+          </div>
+          {reportLoading ? (
+            <div className="empty-state">Cargando reporte...</div>
+          ) : reportError ? (
+            <div className="status-banner status-error">{reportError}</div>
+          ) : safeReport ? (
+            <pre className="report-pre report-box">{safeReport}</pre>
+          ) : (
+            <div className="empty-state">No hay reporte disponible para la ejecución seleccionada.</div>
+          )}
+        </details>
       </div>
 
       <div className="card detail-section">
-        <h3>Metadata del modelo</h3>
-        {metadataLoading ? (
-          <div className="empty-state">Cargando metadata...</div>
-        ) : metadataError ? (
-          <div className="status-banner status-error">{metadataError}</div>
-        ) : metadata ? (
-          <>
-            <KeyValueGrid title="Resumen de metadata" items={metadataItems} />
-            <InfoList title="Features usadas" items={[
-              ['numeric_features', (metadata.numeric_features || []).join(', ') || 'N/A'],
-              ['categorical_features', (metadata.categorical_features || []).join(', ') || 'N/A'],
-              ['model_input_columns', (metadata.model_input_columns || []).join(', ') || 'N/A'],
-              ['excluded_columns', sanitizeDisplayValue(metadata.excluded_columns || []).join(', ') || 'N/A'],
-            ]} />
-            <div className="status-banner status-info">
-              customer_hash se conserva como contexto, no como predictor directo. No se usaron etiquetas de fraude confirmado ni reglas como etiquetas.
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">No hay metadata disponible para la ejecución seleccionada.</div>
-        )}
+        <details className="technical-details">
+          <summary>Metadata del modelo</summary>
+          {metadataLoading ? (
+            <div className="empty-state">Cargando metadata...</div>
+          ) : metadataError ? (
+            <div className="status-banner status-error">{metadataError}</div>
+          ) : metadata ? (
+            <>
+              <KeyValueGrid title="Resumen de metadata" items={metadataItems} />
+              <InfoList title="Features usadas" items={[
+                ['numeric_features', (metadata.numeric_features || []).join(', ') || 'N/A'],
+                ['categorical_features', (metadata.categorical_features || []).join(', ') || 'N/A'],
+                ['model_input_columns', (metadata.model_input_columns || []).join(', ') || 'N/A'],
+                ['feature_columns', (metadata.feature_columns || []).join(', ') || 'N/A'],
+                ['excluded_columns', sanitizeDisplayValue(metadata.excluded_columns || []).join(', ') || 'N/A'],
+              ]} />
+              <InfoList title="Archivos generados" items={[
+                ['model_path/model_file', metadata.model_path || metadata.model_file || 'N/A'],
+                ['score_file/scores_file', metadata.score_file || metadata.scores_file || 'N/A'],
+                ['feature_file', metadata.feature_file || 'N/A'],
+                ['report_file', metadata.report_file || 'N/A'],
+              ]} />
+              <div className="status-banner status-info">
+                customer_hash se conserva como contexto, no como predictor directo. No se usaron etiquetas de fraude confirmado ni reglas como etiquetas.
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">No hay metadata disponible para la ejecución seleccionada.</div>
+          )}
+        </details>
       </div>
 
       {selectedAnomaly && (

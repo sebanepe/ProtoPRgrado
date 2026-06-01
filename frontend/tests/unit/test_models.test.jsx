@@ -67,7 +67,8 @@ describe('Models page', () => {
   it('loads the unsupervised anomaly dashboard', async () => {
     render(<Models />)
     await waitFor(() => expect(getAnomalyRuns).toHaveBeenCalled())
-    expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getByText('Detectan comportamientos atípicos sin usar etiquetas humanas.')).toBeTruthy()
     expect(screen.getByText('Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
   })
 })

@@ -267,8 +267,13 @@ describe('Models page', () => {
     render(<Models />)
 
     await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
-    expect(screen.getByText('No Supervisados')).toBeTruthy()
+    expect(screen.getByText('Modelos No Supervisados')).toBeTruthy()
+    expect(screen.getByText('Detectan comportamientos atípicos sin usar etiquetas humanas.')).toBeTruthy()
+    expect(screen.getByText('Estos modelos analizan patrones transaccionales y marcan operaciones que se alejan del comportamiento general. Una anomalía no significa fraude confirmado.')).toBeTruthy()
     expect(screen.getByLabelText('Modelo no supervisado').value).toBe('isolation_forest')
+    expect(screen.getByText('Busca transacciones que se aíslan fácilmente del resto.')).toBeTruthy()
+    expect(screen.getByText('Aprende a reconstruir transacciones normales.')).toBeTruthy()
+    expect(screen.getByText('Porcentaje aproximado de transacciones que el modelo marcará como anómalas.')).toBeTruthy()
     expect(screen.getByLabelText('n_estimators')).toBeTruthy()
     expect(screen.getByLabelText('max_categories')).toBeTruthy()
     expect(screen.queryByLabelText('epochs')).toBeNull()
@@ -313,7 +318,7 @@ describe('Models page', () => {
     fireEvent.change(screen.getByLabelText('Modelo no supervisado'), { target: { value: 'autoencoder_pytorch' } })
     fireEvent.click(screen.getByRole('button', { name: 'Ejecutar entrenamiento' }))
 
-    await waitFor(() => expect(screen.getByText('PyTorch no está disponible en el entorno actual. Instale o habilite PyTorch para entrenar el Autoencoder.')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('PyTorch no está disponible. Puede seguir usando Isolation Forest o instalar PyTorch para habilitar Autoencoder.')).toBeTruthy())
   })
 
   it('shows Autoencoder metrics and scores without fraud labels', async () => {
@@ -323,9 +328,9 @@ describe('Models page', () => {
     fireEvent.change(screen.getByLabelText('Modelo no supervisado'), { target: { value: 'autoencoder_pytorch' } })
 
     await waitFor(() => expect(screen.getAllByText('autoencoder_pytorch').length).toBeGreaterThan(0))
-    expect(screen.getByText('reconstruction_error')).toBeTruthy()
-    expect(screen.getByText('autoencoder_anomaly_score')).toBeTruthy()
-    expect(screen.getByText('autoencoder_anomaly_flag')).toBeTruthy()
+    expect(screen.getByText('Error de reconstrucción')).toBeTruthy()
+    expect(screen.getByText('Score Autoencoder')).toBeTruthy()
+    expect(screen.getByText('Marcada como anomalía')).toBeTruthy()
     expect(screen.queryByText('is_fraud')).toBeNull()
     expect(screen.queryByText('confirmed_fraud')).toBeNull()
   })
@@ -340,9 +345,18 @@ describe('Models page', () => {
     await waitFor(() => expect(api.getAnomalyReport).toHaveBeenCalledWith('run_26'))
     await waitFor(() => expect(api.getAnomalyModelMetadata).toHaveBeenCalledWith('run_26'))
 
-    expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Modelos No Supervisados').length).toBeGreaterThan(0)
     expect(screen.getByText('Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.')).toBeTruthy()
-    expect(screen.getByText('Total de anomalías')).toBeTruthy()
+    expect(screen.getByText('Resumen visual del entrenamiento')).toBeTruthy()
+    expect(screen.getByText('Anomalías detectadas')).toBeTruthy()
+    expect(screen.getByText('Distribución de resultados')).toBeTruthy()
+    expect(screen.getByText('Top anomalías por score')).toBeTruthy()
+    expect(screen.getByText('Distribución de scores')).toBeTruthy()
+    expect(screen.getAllByText('ID Transacción').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Cliente anonimizado').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Score de anomalía').length).toBeGreaterThan(0)
+    expect(screen.getByText('Cómo interpretar los resultados')).toBeTruthy()
+    expect(screen.getByText('Metadata del modelo')).toBeTruthy()
     expect(screen.getAllByText((_, element) => (element?.textContent || '').replace(/\D/g, '') === '5481').length).toBeGreaterThan(0)
     expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('Las anomalías detectadas no representan fraude confirmado.')).length).toBeGreaterThan(0)
     expect(screen.getAllByText((_, element) => (element?.textContent || '').includes('source_run: preprocessed_run_26')).length).toBeGreaterThan(0)
@@ -390,6 +404,17 @@ describe('Models page', () => {
       max_categories: '50',
       sample_size: '',
     }))
+  })
+
+  it('keeps forbidden sensitive fields out of the unsupervised UI', async () => {
+    render(<Models />)
+
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    expect(screen.queryByText('is_fraud')).toBeNull()
+    expect(screen.queryByText('confirmed_fraud')).toBeNull()
+    expect(screen.queryByText('PAN_TARJETA')).toBeNull()
+    expect(screen.queryByText('TARJETA')).toBeNull()
   })
 })
 
