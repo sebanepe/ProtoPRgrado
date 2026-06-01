@@ -8,7 +8,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from collections import Counter
+from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -43,6 +43,20 @@ from backend.app.services.authorization import get_user_from_header, require_per
 
 router = APIRouter(prefix="/api/rules", tags=["rules", "alert_rules", "fraud_rules"])
 logger = logging.getLogger(__name__)
+_CSV_CACHE_MAX_ITEMS = 8
+_LOOKUP_CACHE_MAX_ITEMS = 512
+_SUMMARY_TRANSACTIONS_CACHE_MAX_ITEMS = 256
+_SUMMARY_FRAME_CACHE_MAX_ITEMS = 8
+_CSV_CACHE: OrderedDict[str, tuple[tuple[int, int], pd.DataFrame]] = OrderedDict()
+_CUSTOMER_CARD_CACHE: OrderedDict[tuple[str, tuple[int, int]], dict[str, Any]] = OrderedDict()
+_SUMMARY_TRANSACTIONS_CACHE: OrderedDict[
+    tuple[str, str, tuple[tuple[str, Optional[int], Optional[int]], ...], tuple[int, int]],
+    tuple[str, list[dict[str, Any]], Optional[str]],
+] = OrderedDict()
+_SUMMARY_FRAME_CACHE: OrderedDict[
+    tuple[str, tuple[Optional[int], Optional[int]], tuple[Optional[int], Optional[int]], str],
+    pd.DataFrame,
+] = OrderedDict()
 
 
 def _processed_dir() -> Path:
@@ -51,6 +65,45 @@ def _processed_dir() -> Path:
 
 def _uploads_dir() -> Path:
     return Path(os.environ.get("DATASET_STORAGE") or os.path.join(os.getcwd(), "data", "uploads"))
+
+
+def _cache_put(cache: OrderedDict, key: Any, value: Any, max_items: int) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > max_items:
+        cache.popitem(last=False)
+
+
+def _path_signature(path: Path) -> tuple[Optional[int], Optional[int]]:
+    try:
+        stat = path.stat()
+        return stat.st_mtime_ns, stat.st_size
+    except FileNotFoundError:
+        return None, None
+
+
+def _uploads_signature() -> tuple[int, int]:
+    uploads_dir = _uploads_dir()
+    if not uploads_dir.exists():
+        return 0, 0
+
+    count = 0
+    latest_mtime = 0
+    for csv_path in uploads_dir.glob("*.csv"):
+        try:
+            stat = csv_path.stat()
+        except FileNotFoundError:
+            continue
+        count += 1
+        latest_mtime = max(latest_mtime, stat.st_mtime_ns)
+    return count, latest_mtime
+
+
+def _summary_transactions_signature(run_id: str) -> tuple[tuple[str, Optional[int], Optional[int]], ...]:
+    return tuple(
+        (path.name, *_path_signature(path))
+        for path in (_alerts_file(run_id), _summary_file(run_id), _processed_file(run_id))
+    )
 
 
 def _to_posix_path(path: Path) -> str:
@@ -126,6 +179,12 @@ def _lookup_customer_card(customer_hash: str) -> dict[str, Any]:
     if not normalized_hash:
         return {"customer_hash": customer_hash, "masked_card": None, "last4": None, "available": False}
 
+    cache_key = (normalized_hash, _uploads_signature())
+    cached = _CUSTOMER_CARD_CACHE.get(cache_key)
+    if cached is not None:
+        _CUSTOMER_CARD_CACHE.move_to_end(cache_key)
+        return dict(cached)
+
     uploads_dir = _uploads_dir()
     if not uploads_dir.exists():
         return {"customer_hash": normalized_hash, "masked_card": None, "last4": None, "available": False}
@@ -171,16 +230,20 @@ def _lookup_customer_card(customer_hash: str) -> dict[str, Any]:
                 if not masked_value and pan_col and match_row.get(pan_col) is not None:
                     masked_value = _mask_card_value(match_row.get(pan_col))
 
-                return {
+                result = {
                     "customer_hash": normalized_hash,
                     "masked_card": masked_value,
                     "last4": _last4_from_masked_card(masked_value),
                     "available": bool(masked_value),
                 }
+                _cache_put(_CUSTOMER_CARD_CACHE, cache_key, result, _LOOKUP_CACHE_MAX_ITEMS)
+                return dict(result)
         except Exception:
             continue
 
-    return {"customer_hash": normalized_hash, "masked_card": None, "last4": None, "available": False}
+    result = {"customer_hash": normalized_hash, "masked_card": None, "last4": None, "available": False}
+    _cache_put(_CUSTOMER_CARD_CACHE, cache_key, result, _LOOKUP_CACHE_MAX_ITEMS)
+    return dict(result)
 
 
 def _summary_rule_category(rule_code: Any) -> str:
@@ -309,19 +372,25 @@ def _rows_by_transaction_ids(dataframes: list[pd.DataFrame], transaction_ids: li
     if not transaction_ids:
         return []
 
+    transaction_id_set = set(transaction_ids)
     row_map: dict[str, dict[str, Any]] = {}
     for dataframe in dataframes:
         if dataframe.empty or "transaction_id" not in dataframe.columns:
             continue
-        for _, row in dataframe.iterrows():
+
+        transaction_ids_series = dataframe["transaction_id"].fillna("").astype(str).str.strip()
+        matches = dataframe.loc[transaction_ids_series.isin(transaction_id_set)]
+        if matches.empty:
+            continue
+
+        for row in matches.to_dict(orient="records"):
             transaction_id = _normalize_filter_value(row.get("transaction_id"))
             if not transaction_id:
                 continue
-            row_dict = row.to_dict()
             if transaction_id not in row_map:
-                row_map[transaction_id] = row_dict
+                row_map[transaction_id] = row
             else:
-                _merge_missing_row_values(row_map[transaction_id], row_dict)
+                _merge_missing_row_values(row_map[transaction_id], row)
 
     resolved_rows: list[dict[str, Any]] = []
     for transaction_id in transaction_ids:
@@ -453,6 +522,13 @@ def _reconstruct_double_country_summary_rows(
 
 
 def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[str, list[dict[str, Any]], Optional[str]]:
+    cache_key = (str(run_id), str(alert_id), _summary_transactions_signature(run_id), _uploads_signature())
+    cached = _SUMMARY_TRANSACTIONS_CACHE.get(cache_key)
+    if cached is not None:
+        _SUMMARY_TRANSACTIONS_CACHE.move_to_end(cache_key)
+        resolved_alert_id, cached_items, warning = cached
+        return resolved_alert_id, [dict(item) for item in cached_items], warning
+
     alerts_path = _alerts_file(run_id)
     summary_path = _summary_file(run_id)
     preprocessed_path = _processed_file(run_id)
@@ -490,7 +566,14 @@ def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[st
         if child_transaction_ids:
             transaction_rows = _rows_by_transaction_ids([alerts_df, preprocessed_df], child_transaction_ids)
         if is_double_country_rule:
-            reconstructed_rows = _reconstruct_double_country_summary_rows(alerts_df, preprocessed_df, summary_row, expected_countries)
+            resolved_countries = {
+                _normalize_filter_value(row.get("country_code"), uppercase=True)
+                for row in transaction_rows
+                if _normalize_filter_value(row.get("country_code"), uppercase=True)
+            }
+            reconstructed_rows = []
+            if len(resolved_countries) < 2:
+                reconstructed_rows = _reconstruct_double_country_summary_rows(alerts_df, preprocessed_df, summary_row, expected_countries)
             if reconstructed_rows:
                 transaction_rows_by_id = {
                     _normalize_filter_value(row.get("transaction_id")): row
@@ -607,6 +690,12 @@ def _load_summary_transactions_for_alert(run_id: str, alert_id: str) -> tuple[st
                 f"se esperaban al menos 2 para {resolved_rule_code}."
             )
 
+    _cache_put(
+        _SUMMARY_TRANSACTIONS_CACHE,
+        cache_key,
+        (resolved_alert_id, [dict(item) for item in items], warning),
+        _SUMMARY_TRANSACTIONS_CACHE_MAX_ITEMS,
+    )
     return resolved_alert_id, items, warning
 
 
@@ -629,7 +718,16 @@ def _report_file(run_id: str) -> Path:
 def _load_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File not found: {path.name}")
-    return pd.read_csv(path)
+    resolved_path = str(path.resolve())
+    signature = path.stat().st_mtime_ns, path.stat().st_size
+    cached = _CSV_CACHE.get(resolved_path)
+    if cached and cached[0] == signature:
+        _CSV_CACHE.move_to_end(resolved_path)
+        return cached[1].copy(deep=False)
+
+    df = pd.read_csv(path)
+    _cache_put(_CSV_CACHE, resolved_path, (signature, df), _CSV_CACHE_MAX_ITEMS)
+    return df.copy(deep=False)
 
 
 def _read_json_file(path: Path) -> Optional[dict[str, Any]]:
@@ -913,9 +1011,27 @@ def _enrich_summary_with_alerts(summary_df: pd.DataFrame, alerts_df: pd.DataFram
 
 
 def _load_summary_for_run(run_id: str, db: Session) -> pd.DataFrame:
+    cache_key = (
+        str(run_id),
+        _path_signature(_summary_file(run_id)),
+        _path_signature(_alerts_file(run_id)),
+        _review_signature(db, run_id),
+    )
+    cached = _SUMMARY_FRAME_CACHE.get(cache_key)
+    if cached is not None:
+        _SUMMARY_FRAME_CACHE.move_to_end(cache_key)
+        return cached.copy(deep=False)
+
     summary_df = _load_csv(_summary_file(run_id))
     summary_df = _merge_statuses(summary_df, db, run_id, is_summary=True)
-    return _enrich_summary_with_alerts(summary_df, _load_alerts_df_for_run(run_id))
+    enriched_df = _enrich_summary_with_alerts(summary_df, _load_alerts_df_for_run(run_id))
+    if "transaction_date" not in enriched_df.columns:
+        if "window_start" in enriched_df.columns:
+            enriched_df["transaction_date"] = enriched_df["window_start"]
+        elif "window_end" in enriched_df.columns:
+            enriched_df["transaction_date"] = enriched_df["window_end"]
+    _cache_put(_SUMMARY_FRAME_CACHE, cache_key, enriched_df, _SUMMARY_FRAME_CACHE_MAX_ITEMS)
+    return enriched_df.copy(deep=False)
 
 
 def _match_summary_filter(df: pd.DataFrame, column: str, value: Optional[str]) -> pd.Series:
@@ -1087,6 +1203,47 @@ def _apply_filters(df: pd.DataFrame, filters: Dict[str, Optional[str]], *, allow
     return result
 
 
+def _apply_transaction_date_filters(
+    df: pd.DataFrame,
+    date_from: Optional[str],
+    date_to: Optional[str],
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    date_column = next((column for column in ("transaction_date", "window_start", "window_end") if column in df.columns), None)
+    if not date_column:
+        return df
+
+    result = df.copy()
+    dates = pd.to_datetime(result[date_column], errors="coerce", utc=True)
+    start = pd.to_datetime(date_from, errors="coerce", utc=True) if date_from else None
+    end = pd.to_datetime(date_to, errors="coerce", utc=True) if date_to else None
+
+    if start is not None and not pd.isna(start):
+        result = result.loc[dates >= start]
+        dates = dates.loc[result.index]
+    if end is not None and not pd.isna(end):
+        end_of_day = end.normalize() + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        result = result.loc[dates <= end_of_day]
+    return result
+
+
+def _sort_by_transaction_date(df: pd.DataFrame) -> pd.DataFrame:
+    date_column = next((column for column in ("transaction_date", "window_start", "window_end") if column in df.columns), None)
+    if df.empty or not date_column:
+        return df
+    result = df.copy()
+    result["_transaction_sort_date"] = pd.to_datetime(result[date_column], errors="coerce", utc=True)
+    sort_columns = ["_transaction_sort_date"]
+    ascending = [False]
+    if "summary_alert_id" in result.columns:
+        sort_columns.append("summary_alert_id")
+        ascending.append(True)
+    result = result.sort_values(sort_columns, ascending=ascending, na_position="last")
+    return result.drop(columns=["_transaction_sort_date"], errors="ignore")
+
+
 def _paginate(df: pd.DataFrame, page: int, page_size: int) -> tuple[pd.DataFrame, int, int, int]:
     safe_page = max(1, page)
     safe_page_size = min(max(1, page_size), 200)
@@ -1197,6 +1354,8 @@ def get_summary(
     country_code: Optional[str] = Query(None),
     merchant_rubro_proxy: Optional[str] = Query(None),
     customer_hash: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ) -> PaginatedAlertSummaryResponse:
     df = _load_summary_for_run(run_id, db)
@@ -1227,6 +1386,8 @@ def get_summary(
         )
 
     filtered = _apply_filters(df, normalized_filters, allowed_missing={"country_code", "merchant_rubro_proxy"})
+    filtered = _apply_transaction_date_filters(filtered, date_from, date_to)
+    filtered = _sort_by_transaction_date(filtered)
     total_after_filter = int(len(filtered))
 
     if normalized_rule_code:
@@ -1344,7 +1505,7 @@ def get_alert_detail(alert_id: str, run_id: Optional[str] = Query(None), db: Ses
     for path in candidates:
         if not path.exists():
             continue
-        df = pd.read_csv(path)
+        df = _load_csv(path)
         if "alert_id" not in df.columns:
             continue
         match = df.loc[df["alert_id"].astype(str) == str(alert_id)]

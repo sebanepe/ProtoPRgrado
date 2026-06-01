@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import re
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +19,8 @@ from backend.app.services.anomaly_service import AnomalyService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 api_router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+_CSV_CACHE_MAX_ITEMS = 4
+_CSV_CACHE: OrderedDict[str, tuple[tuple[int, int], pd.DataFrame]] = OrderedDict()
 
 SENSITIVE_COLUMNS = {
     "pan",
@@ -76,7 +79,19 @@ def _summary_path(source_run: str) -> Path:
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, dtype={"merchant_rubro_proxy": str}, low_memory=False)
+    signature = (path.stat().st_mtime_ns, path.stat().st_size)
+    cache_key = str(path.resolve())
+    cached = _CSV_CACHE.get(cache_key)
+    if cached and cached[0] == signature:
+        _CSV_CACHE.move_to_end(cache_key)
+        return cached[1].copy(deep=False)
+
+    frame = pd.read_csv(path, dtype={"merchant_rubro_proxy": str}, low_memory=False)
+    _CSV_CACHE[cache_key] = (signature, frame)
+    _CSV_CACHE.move_to_end(cache_key)
+    while len(_CSV_CACHE) > _CSV_CACHE_MAX_ITEMS:
+        _CSV_CACHE.popitem(last=False)
+    return frame.copy(deep=False)
 
 
 def _clean_value(value: Any) -> Any:

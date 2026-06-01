@@ -575,7 +575,91 @@ button, input, select, textarea {
 }
 
 .alert-summary-table {
-	min-width: 1120px;
+	min-width: 1320px;
+	table-layout: fixed;
+}
+
+.alert-summary-table th,
+.alert-summary-table td {
+	overflow-wrap: normal;
+	word-break: normal;
+	line-height: 1.35;
+}
+
+.alert-summary-table th:nth-child(1),
+.alert-summary-table td:nth-child(1) {
+	width: 128px;
+}
+
+.alert-summary-table th:nth-child(2),
+.alert-summary-table td:nth-child(2) {
+	width: 150px;
+	white-space: nowrap;
+}
+
+.alert-summary-table th:nth-child(3),
+.alert-summary-table td:nth-child(3) {
+	width: 150px;
+	overflow-wrap: anywhere;
+}
+
+.alert-summary-table th:nth-child(4),
+.alert-summary-table td:nth-child(4) {
+	width: 330px;
+}
+
+.alert-summary-table th:nth-child(5),
+.alert-summary-table td:nth-child(5),
+.alert-summary-table th:nth-child(6),
+.alert-summary-table td:nth-child(6),
+.alert-summary-table th:nth-child(7),
+.alert-summary-table td:nth-child(7) {
+	width: 82px;
+}
+
+.alert-summary-table th:nth-child(8),
+.alert-summary-table td:nth-child(8) {
+	width: 120px;
+}
+
+.alert-summary-table th:nth-child(9),
+.alert-summary-table td:nth-child(9) {
+	width: 130px;
+}
+
+.alert-summary-table th:nth-child(10),
+.alert-summary-table td:nth-child(10) {
+	width: 120px;
+}
+
+.summary-cell-rule_code,
+.rule-label-cell {
+	font-weight: 700;
+	color: var(--text-main);
+}
+
+.rule-code-cell {
+	margin-top: 4px;
+	font-size: 11px;
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}
+
+.summary-cell-countries_detected,
+.summary-cell-risk_level,
+.summary-cell-status,
+.summary-cell-count_transactions,
+.summary-cell-max_risk_score {
+	white-space: nowrap;
+}
+
+.rules-distribution-table {
+	table-layout: fixed;
+}
+
+.rules-distribution-table th:first-child,
+.rules-distribution-table td:first-child {
+	width: 68%;
 }
 
 .detail-table {

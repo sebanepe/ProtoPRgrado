@@ -102,6 +102,45 @@ const normalizeMetrics = (metrics) => {
   }
 }
 
+const RULE_LABELS = {
+  RULE_CONTEXTUAL_HIGH_RISK_MCC_WITH_SIGNAL: 'Rubro de alto riesgo con otra señal',
+  RULE_VELOCITY_CARD_HOUR: 'Muchas operaciones de la tarjeta en una hora',
+  RULE_VELOCITY_CARD_DAY: 'Muchas operaciones de la tarjeta en el día',
+  RULE_STRONG_HIGH_RISK_MCC_AMOUNT: 'Monto alto en rubro de alto riesgo',
+  RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY: 'Tarjeta presente en dos países el mismo día',
+  RULE_DOUBLE_COUNTRY_CARD_ABSENT_CONTEXTUAL: 'Uso remoto en varios países con contexto sospechoso',
+  RULE_INTERNET_VELOCITY_DAY: 'Muchas operaciones por internet en el día',
+  RULE_ATM_OR_CASH_WITHDRAWAL_VELOCITY_HOUR: 'Retiros frecuentes en una hora',
+  RULE_ATM_OR_CASH_WITHDRAWAL_DAY: 'Retiros frecuentes en el día',
+  RULE_CONTACTLESS_NO_PIN_DAY: 'Contactless sin PIN repetido en el día',
+  RULE_CONTACTLESS_NO_PIN_HOUR: 'Contactless sin PIN repetido en una hora',
+  RULE_JEWELRY_MCC_HIGH_AMOUNT: 'Monto alto en joyería',
+  RULE_GAMBLING_MCC: 'Operación en juegos de azar',
+  RULE_DOUBLE_COUNTRY_CARD_PRESENT_CONTEXTUAL: 'Tarjeta presente en varios países con contexto sospechoso',
+  RULE_DOUBLE_COUNTRY_CARD_ABSENT_SAME_DAY: 'Uso remoto en dos países el mismo día'
+}
+
+const STATUS_LABELS = {
+  NEW: 'Nuevo',
+  IN_REVIEW: 'En revisión',
+  DISMISSED: 'Descartado',
+  FALSE_POSITIVE: 'Falso positivo',
+  CONFIRMED_FRAUD: 'Fraude confirmado'
+}
+
+const RISK_LABELS = {
+  LOW: 'Bajo',
+  MEDIUM: 'Medio',
+  HIGH: 'Alto',
+  CRITICAL: 'Crítico'
+}
+
+const getRuleLabel = (value) => RULE_LABELS[String(value || '').trim().toUpperCase()] || String(value || 'N/A').replace(/^RULE_/, '').replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase())
+const getStatusLabel = (value) => STATUS_LABELS[String(value || '').trim().toUpperCase()] || value || 'N/A'
+const getRiskLabel = (value) => RISK_LABELS[String(value || '').trim().toUpperCase()] || value || 'N/A'
+const formatCountries = (value) => String(value || 'N/A').replaceAll('|', ', ')
+const formatTransactionDate = (row) => formatDateTime(row.transaction_date || row.window_start || row.window_end) || 'N/A'
+
 export default function RulesAlerts() {
   // State for runs list
   const [runs, setRuns] = useState([])
@@ -136,7 +175,9 @@ export default function RulesAlerts() {
     status: '',
     country_code: '',
     merchant_rubro_proxy: '',
-    customer_hash: ''
+    customer_hash: '',
+    date_from: '',
+    date_to: ''
   })
   const [filterOptions, setFilterOptions] = useState({
     rule_code: [],
@@ -358,7 +399,9 @@ export default function RulesAlerts() {
       status: '',
       country_code: '',
       merchant_rubro_proxy: '',
-      customer_hash: ''
+      customer_hash: '',
+      date_from: '',
+      date_to: ''
     }
     setFilters(clearedFilters)
     setPagination(prev => ({ ...prev, page: 1 }))
@@ -625,26 +668,42 @@ export default function RulesAlerts() {
     setReviewMsg('Actualizando estado...')
     try {
       const runId = getRunId(selectedRun)
+      const updatedStatus = selectedStatusForUpdate
       if (selectedAlert.summary_alert_id) {
         await updateSummaryAlertReviewStatus(
           selectedAlert.summary_alert_id,
           runId,
-          selectedStatusForUpdate,
+          updatedStatus,
           analystNotes
         )
       } else if (selectedAlert.alert_id) {
         await updateAlertReviewStatus(
           selectedAlert.alert_id,
           runId,
-          selectedStatusForUpdate,
+          updatedStatus,
           analystNotes
         )
       }
       setReviewMsg(`✓ Estado actualizado a ${selectedStatusForUpdate}`)
+      setSelectedAlert((prev) => prev ? { ...prev, status: updatedStatus } : prev)
+      setDetailAlerts((prev) => prev.map((item) => ({ ...item, status: updatedStatus })))
+      setSummary((prev) => {
+        const summaryAlertId = selectedAlert.summary_alert_id
+        const alertId = selectedAlert.alert_id
+        const statusFilter = String(filters.status || '').trim().toUpperCase()
+        return prev
+          .map((item) => {
+            const sameSummary = summaryAlertId && item.summary_alert_id === summaryAlertId
+            const sameAlert = alertId && item.alert_id === alertId
+            return sameSummary || sameAlert ? { ...item, status: updatedStatus } : item
+          })
+          .filter((item) => !statusFilter || String(item.status || '').trim().toUpperCase() === statusFilter)
+      })
+      if (filters.status && String(filters.status).trim().toUpperCase() !== updatedStatus) {
+        setPagination((prev) => ({ ...prev, total: Math.max(0, Number(prev.total || 0) - 1) }))
+      }
       // Reload history
       await loadReviewHistory(selectedAlert)
-      // Reload summary to show updated status
-      await loadSummary(pagination.page, filters)
     } catch (e) {
       setReviewMsg('Error al actualizar estado: ' + (e?.response?.data?.detail || e?.message || String(e)))
     } finally {
@@ -656,15 +715,25 @@ export default function RulesAlerts() {
 
   const summaryColumns = [
     { key: 'summary_alert_id', title: 'ID Alerta' },
+    { key: 'transaction_date', title: 'Fecha Tx' },
     { key: 'customer_hash', title: 'Cliente' },
     { key: 'rule_code', title: 'Regla' },
-    { key: 'rule_name', title: 'Nombre Regla' },
-    { key: 'risk_level', title: 'Nivel Riesgo' },
+    { key: 'risk_level', title: 'Riesgo' },
     { key: 'max_risk_score', title: 'Score' },
-    { key: 'count_transactions', title: 'Tx Detectadas' },
+    { key: 'count_transactions', title: 'Tx' },
     { key: 'countries_detected', title: 'Países' },
     { key: 'status', title: 'Estado' }
   ]
+
+  const renderSummaryCell = (row, columnKey) => {
+    if (columnKey === 'transaction_date') return formatTransactionDate(row)
+    if (columnKey === 'rule_code') return <span title={row.rule_code || ''}>{getRuleLabel(row.rule_code)}</span>
+    if (columnKey === 'risk_level') return getRiskLabel(row.risk_level)
+    if (columnKey === 'countries_detected') return formatCountries(row.countries_detected)
+    if (columnKey === 'status') return getStatusLabel(row.status)
+    if (columnKey === 'max_risk_score') return row.max_risk_score ?? row.risk_score ?? 'N/A'
+    return row[columnKey] || 'N/A'
+  }
 
   return (
     <div>
@@ -795,11 +864,11 @@ export default function RulesAlerts() {
             />
             <KPICard
               title="Regla con Más Alertas"
-              value={metrics.top_rule_code || 'N/A'}
+              value={getRuleLabel(metrics.top_rule_code)}
             />
             <KPICard
               title="Riesgo Predominante"
-              value={metrics.top_risk_level || 'N/A'}
+              value={getRiskLabel(metrics.top_risk_level)}
             />
             <KPICard
               title="MCC Más Frecuente"
@@ -813,7 +882,7 @@ export default function RulesAlerts() {
           {metrics.rules_distribution && (
             <div className="card">
               <h4>Distribución por Regla</h4>
-              <table className="table">
+              <table className="table rules-distribution-table">
                 <thead>
                   <tr>
                     <th>Regla</th>
@@ -824,7 +893,10 @@ export default function RulesAlerts() {
                 <tbody>
                   {Object.entries(metrics.rules_distribution).map(([rule, count]) => (
                     <tr key={rule}>
-                      <td>{rule}</td>
+                      <td>
+                        <div className="rule-label-cell">{getRuleLabel(rule)}</div>
+                        <div className="rule-code-cell">{rule}</div>
+                      </td>
                       <td>{count?.toLocaleString() || 0}</td>
                       <td>
                         {(
@@ -867,7 +939,7 @@ export default function RulesAlerts() {
               >
                 <option value="">-- Todas --</option>
                 {filterOptions.rule_code.map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={option} value={option}>{getRuleLabel(option)}</option>
                 ))}
               </select>
             </div>
@@ -881,7 +953,7 @@ export default function RulesAlerts() {
               >
                 <option value="">-- Todos --</option>
                 {(filterOptions.risk_level.length > 0 ? filterOptions.risk_level : ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={option} value={option}>{getRiskLabel(option)}</option>
                 ))}
               </select>
             </div>
@@ -895,7 +967,7 @@ export default function RulesAlerts() {
               >
                 <option value="">-- Todos --</option>
                 {(filterOptions.status.length > 0 ? filterOptions.status : ['NEW', 'IN_REVIEW', 'DISMISSED', 'FALSE_POSITIVE', 'CONFIRMED_FRAUD']).map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={option} value={option}>{getStatusLabel(option)}</option>
                 ))}
               </select>
             </div>
@@ -944,6 +1016,26 @@ export default function RulesAlerts() {
                   ))}
                 </datalist>
               )}
+            </div>
+            <div className="form-row">
+              <label>Fecha desde:</label>
+              <input
+                type="date"
+                className="input"
+                aria-label="Fecha desde"
+                value={filters.date_from}
+                onChange={(e) => setFilters((prev) => ({ ...prev, date_from: e.target.value }))}
+              />
+            </div>
+            <div className="form-row">
+              <label>Fecha hasta:</label>
+              <input
+                type="date"
+                className="input"
+                aria-label="Fecha hasta"
+                value={filters.date_to}
+                onChange={(e) => setFilters((prev) => ({ ...prev, date_to: e.target.value }))}
+              />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -997,7 +1089,9 @@ export default function RulesAlerts() {
                     {summary.map((row, idx) => (
                       <tr key={idx}>
                         {summaryColumns.map(col => (
-                          <td key={col.key}>{row[col.key] || 'N/A'}</td>
+                          <td key={col.key} className={`summary-cell summary-cell-${col.key}`}>
+                            {renderSummaryCell(row, col.key)}
+                          </td>
                         ))}
                         <td style={{ display: 'flex', gap: 6, whiteSpace: 'nowrap' }}>
                           <button
@@ -1132,15 +1226,18 @@ export default function RulesAlerts() {
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Regla:</td>
-                    <td>{selectedAlert.rule_code || 'N/A'}</td>
+                    <td>
+                      <div className="rule-label-cell">{getRuleLabel(selectedAlert.rule_code)}</div>
+                      <div className="rule-code-cell">{selectedAlert.rule_code || 'N/A'}</div>
+                    </td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Nombre Regla:</td>
-                    <td>{selectedAlert.rule_name || 'N/A'}</td>
+                    <td>{getRuleLabel(selectedAlert.rule_code || selectedAlert.rule_name)}</td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Nivel Riesgo:</td>
-                    <td>{selectedAlert.risk_level || 'N/A'}</td>
+                    <td>{getRiskLabel(selectedAlert.risk_level)}</td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Score Máximo:</td>
@@ -1166,7 +1263,7 @@ export default function RulesAlerts() {
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Países Detectados:</td>
-                    <td>{selectedAlert.countries_detected || 'N/A'}</td>
+                    <td>{formatCountries(selectedAlert.countries_detected)}</td>
                   </tr>
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Ventana Inicio:</td>
@@ -1187,7 +1284,7 @@ export default function RulesAlerts() {
                   <tr>
                     <td style={{ fontWeight: 'bold' }}>Estado Actual:</td>
                     <td style={{ fontWeight: 'bold', color: selectedAlert.status === 'CONFIRMED_FRAUD' ? '#dc2626' : '#2563eb' }}>
-                      {selectedAlert.status || 'NEW'}
+                      {getStatusLabel(selectedAlert.status || 'NEW')}
                     </td>
                   </tr>
                 </tbody>
@@ -1281,9 +1378,9 @@ export default function RulesAlerts() {
                         {reviewHistory.map((entry, idx) => (
                           <tr key={idx}>
                             <td>{formatDateTime(entry.reviewed_at) || 'N/A'}</td>
-                            <td>{entry.previous_status || 'N/A'}</td>
+                            <td>{getStatusLabel(entry.previous_status)}</td>
                             <td style={{ fontWeight: 'bold', color: entry.new_status === 'CONFIRMED_FRAUD' ? '#ff7b89' : '#6aa9ff' }}>
-                              {entry.new_status}
+                              {getStatusLabel(entry.new_status)}
                             </td>
                             <td style={{ maxWidth: 250, wordBreak: 'break-word', fontSize: 11 }}>
                               {entry.analyst_notes || '-'}

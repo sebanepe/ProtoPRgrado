@@ -67,7 +67,9 @@ def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTas
     total_rows = None
     try:
         # for small files this is cheap; for very large files this may be slow — acceptable for test environment
-        total_rows = int(pd.read_csv(dest_path).shape[0])
+        max_count_bytes = int(os.environ.get("DATASET_IMPORT_COUNT_MAX_BYTES", str(5 * 1024 * 1024)))
+        if os.path.getsize(dest_path) <= max_count_bytes:
+            total_rows = int(pd.read_csv(dest_path).shape[0])
     except Exception:
         total_rows = None
 

@@ -23,10 +23,10 @@ def preview_feature_set(fs_id: int, rows: int = 10, db: Session = Depends(get_db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feature set file not found")
 
     try:
-        df = pd.read_csv(fs.file_path)
+        safe_rows = min(max(int(rows or 10), 1), 200)
+        df = pd.read_csv(fs.file_path, nrows=safe_rows)
         df = df.replace([pd.NA, pd.NaT, np.nan, np.inf, -np.inf, float('inf'), -float('inf')], None)
-        sample = df.head(rows)
-        rows_out = sample.where(pd.notnull(sample), None).to_dict(orient="records")
+        rows_out = df.where(pd.notnull(df), None).to_dict(orient="records")
         payload = {"id": fs.id, "name": fs.name, "rows": rows_out, "columns": list(df.columns)}
         return JSONResponse(status_code=status.HTTP_200_OK, content=jsonable_encoder(payload))
     except Exception as e:

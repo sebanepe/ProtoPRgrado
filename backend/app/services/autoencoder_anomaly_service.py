@@ -22,6 +22,20 @@ class AutoencoderAnomalyService:
     def __init__(self, processed_dir: Optional[str] = None, models_dir: Optional[str] = None):
         self.processed_dir = Path(processed_dir or os.path.join("data", "processed"))
         self.models_dir = Path(models_dir or os.path.join("data", "models"))
+        self._csv_cache: dict[str, tuple[tuple[int, int], pd.DataFrame]] = {}
+
+    def _read_csv_cached(self, path: Path) -> pd.DataFrame:
+        signature = (path.stat().st_mtime_ns, path.stat().st_size)
+        cache_key = str(path.resolve())
+        cached = self._csv_cache.get(cache_key)
+        if cached and cached[0] == signature:
+            return cached[1].copy(deep=False)
+
+        df = pd.read_csv(path, dtype={"merchant_rubro_proxy": str}, low_memory=False)
+        if len(self._csv_cache) >= 4:
+            self._csv_cache.pop(next(iter(self._csv_cache)))
+        self._csv_cache[cache_key] = (signature, df)
+        return df.copy(deep=False)
 
     def train(
         self,
@@ -85,7 +99,7 @@ class AutoencoderAnomalyService:
         score_file = self._find_scores_file(source_run)
         if not score_file or not score_file.exists():
             raise FileNotFoundError(f"Autoencoder scores not found for source_run: {source_run}")
-        df = pd.read_csv(score_file, dtype={"merchant_rubro_proxy": str})
+        df = self._read_csv_cached(score_file)
         if anomaly_flag is not None:
             df = df[df["autoencoder_anomaly_flag"] == anomaly_flag]
         total_items = len(df)

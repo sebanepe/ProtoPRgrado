@@ -24,6 +24,20 @@ class AnomalyService:
     ):
         self.processed_dir = Path(processed_dir or os.path.join("data", "processed"))
         self.models_dir = Path(models_dir or os.path.join("data", "models"))
+        self._csv_cache: Dict[str, Tuple[Tuple[int, int], pd.DataFrame]] = {}
+
+    def _read_csv_cached(self, path: Path) -> pd.DataFrame:
+        signature = (path.stat().st_mtime_ns, path.stat().st_size)
+        cache_key = str(path.resolve())
+        cached = self._csv_cache.get(cache_key)
+        if cached and cached[0] == signature:
+            return cached[1].copy(deep=False)
+
+        df = pd.read_csv(path, dtype={"merchant_rubro_proxy": str}, low_memory=False)
+        if len(self._csv_cache) >= 8:
+            self._csv_cache.pop(next(iter(self._csv_cache)))
+        self._csv_cache[cache_key] = (signature, df)
+        return df.copy(deep=False)
 
     def list_anomaly_runs(self) -> List[Dict[str, Any]]:
         """
@@ -66,8 +80,7 @@ class AnomalyService:
             if run_info["score_file"]:
                 try:
                     score_path = self.processed_dir / run_info["score_file"]
-                    df_scores = pd.read_csv(score_path, nrows=1)  # Read first row to get columns
-                    df_all = pd.read_csv(score_path)
+                    df_all = self._read_csv_cached(score_path)
                     anomaly_count = (df_all["anomaly_flag"] == 1).sum()
                     total_count = len(df_all)
                     anomaly_rate = anomaly_count / total_count if total_count > 0 else 0.0
@@ -110,11 +123,7 @@ class AnomalyService:
         if not score_file or not score_file.exists():
             raise FileNotFoundError(f"Anomaly scores file not found for run: {run_id}")
 
-        # Read CSV
-        df = pd.read_csv(
-            score_file,
-            dtype={"merchant_rubro_proxy": str},  # Keep as string to avoid dtype warnings
-        )
+        df = self._read_csv_cached(score_file)
 
         # Apply filters
         if anomaly_flag is not None:
@@ -191,10 +200,7 @@ class AnomalyService:
         if not score_file or not score_file.exists():
             raise FileNotFoundError(f"Anomaly scores file not found for run: {run_id}")
 
-        df = pd.read_csv(
-            score_file,
-            dtype={"merchant_rubro_proxy": str},
-        )
+        df = self._read_csv_cached(score_file)
 
         # Filter only anomalies
         df_anomalies = df[df["anomaly_flag"] == 1]
@@ -231,10 +237,7 @@ class AnomalyService:
         if not score_file or not score_file.exists():
             raise FileNotFoundError(f"Anomaly scores file not found for run: {run_id}")
 
-        df = pd.read_csv(
-            score_file,
-            dtype={"merchant_rubro_proxy": str},
-        )
+        df = self._read_csv_cached(score_file)
 
         total_transactions = len(df)
         anomaly_count = (df["anomaly_flag"] == 1).sum()
@@ -411,7 +414,7 @@ class AnomalyService:
 
             if score_file and score_file.exists():
                 try:
-                    df = pd.read_csv(score_file)
+                    df = self._read_csv_cached(score_file)
                     anomaly_count = int((df["anomaly_flag"] == 1).sum())
                     anomaly_rate = anomaly_count / len(df) if len(df) > 0 else 0.0
                 except Exception:

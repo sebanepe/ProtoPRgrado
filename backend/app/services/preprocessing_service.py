@@ -300,10 +300,6 @@ def rerun_preprocessing(db: Session, run_id: int):
         phase_a_df, dropped_columns = _phase_a_filter_columns(cleaned_df)
 
         if phase_a_df is not None and not phase_a_df.empty:
-            output = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
-            save_processed(phase_a_df, output)
-            summary["output_path"] = output
-
             os.makedirs(PROJECT_PROCESSED_DIR, exist_ok=True)
             project_path = os.path.join(PROJECT_PROCESSED_DIR, f"preprocessed_run_{run.id}.csv")
             save_processed(phase_a_df, project_path)

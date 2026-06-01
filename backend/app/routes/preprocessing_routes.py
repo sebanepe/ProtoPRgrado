@@ -85,11 +85,11 @@ def preview_run(run_id: int, db: Session = Depends(get_db), _auth=Depends(requir
     after = []
     if r.output_file_path and os.path.exists(r.output_file_path):
         try:
-            df = pd.read_csv(r.output_file_path)
+            safe_rows = min(max(int(10), 1), 100)
+            df = pd.read_csv(r.output_file_path, nrows=safe_rows)
             # replace problematic values (NaN/inf) with None for JSON serialization
             df = df.replace([pd.NA, pd.NaT, np.nan, np.inf, -np.inf, float('inf'), -float('inf')], None)
-            sample = df.head(10)
-            after = sample.where(pd.notnull(sample), None).to_dict(orient="records")
+            after = df.where(pd.notnull(df), None).to_dict(orient="records")
         except Exception as e:
             # return a JSON error response to ensure CORS headers are applied
             content = {"error": "failed_reading_output", "detail": str(e)}
@@ -166,7 +166,7 @@ def get_run_stages(run_id: int, db: Session = Depends(get_db), _auth=Depends(req
     output_path = r.output_file_path
     if output_path and os.path.exists(output_path):
         try:
-            df_out = pd.read_csv(output_path)
+            df_out = pd.read_csv(output_path, nrows=5)
             # Normalizacion: look for scaled numeric column or simply presence of 'amount_scaled'
             if "amount_scaled" in df_out.columns:
                 stages["normalizacion"] = "COMPLETED"
@@ -178,12 +178,7 @@ def get_run_stages(run_id: int, db: Session = Depends(get_db), _auth=Depends(req
             dummy_like = any(("_" in c and c not in ("is_fraud", "fraud_label_reason")) for c in df_out.columns)
             stages["codificacion"] = "COMPLETED" if dummy_like else "PENDING"
 
-            # SMOTE: if output rows > processed_records stored in run, SMOTE likely applied
-            out_rows = len(df_out)
-            if out_rows > processed_count:
-                stages["smote"] = "COMPLETED"
-            else:
-                stages["smote"] = "NOT_APPLIED"
+            stages["smote"] = "NOT_APPLIED"
 
         except Exception as e:
             for k in stages:

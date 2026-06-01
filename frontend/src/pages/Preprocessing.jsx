@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react'
+import React, {useState, useEffect, useRef} from 'react'
 import { runPreprocessing, listDatasets, previewDataset, deleteDataset, listPreprocessingRuns, previewPreprocessingRun, downloadPreprocessingRun, deletePreprocessingRun, downloadPreprocessingRunReport } from '../services/api'
 
 export default function Preprocessing(){
@@ -11,16 +11,38 @@ export default function Preprocessing(){
   const [runs, setRuns] = useState([])
   const [runPreview, setRunPreview] = useState(null)
   const [loadingDatasets, setLoadingDatasets] = useState(false)
+  const runsPollRef = useRef(null)
+
+  const isActiveRun = (run) => ['PENDING', 'RUNNING'].includes(String(run?.status || '').toUpperCase())
+
+  const stopRunsPolling = () => {
+    if (runsPollRef.current) {
+      clearInterval(runsPollRef.current)
+      runsPollRef.current = null
+    }
+  }
+
+  const startRunsPolling = () => {
+    if (runsPollRef.current) return
+    runsPollRef.current = setInterval(async () => {
+      const latestRuns = await loadRuns()
+      if (!latestRuns.some(isActiveRun)) {
+        stopRunsPolling()
+        setMsg((current) => current.includes('preprocesamiento') || current.includes('Ejecutando') ? 'Preprocesamiento completado' : current)
+      }
+    }, 3000)
+  }
 
   const run = async ()=>{
     setMsg('Ejecutando...')
     try{
       const res = await runPreprocessing()
-      setMsg('Listo')
+      setMsg('Preprocesamiento en ejecución. Actualizando estado...')
       setResultDetails(res)
       setShowResultDetailsJson(false)
       setShowResultModal(true)
       await loadRuns()
+      startRunsPolling()
     }catch(e){ setMsg('Error: '+ (e?.message||e)) }
   }
 
@@ -29,11 +51,12 @@ export default function Preprocessing(){
     try{
       // call backend with selected dataset id so processing is scoped
       const res = await runPreprocessing(datasetId)
-      setMsg('Listo')
+      setMsg('Preprocesamiento en ejecución. Actualizando estado...')
       setResultDetails(res)
       setShowResultDetailsJson(false)
       setShowResultModal(true)
       await loadRuns()
+      startRunsPolling()
     }catch(e){ setMsg('Error: '+ (e?.response?.data?.detail || e?.message || String(e))) }
   }
 
@@ -72,10 +95,18 @@ export default function Preprocessing(){
     try{
       const r = await listPreprocessingRuns()
       setRuns(r||[])
+      if ((r || []).some(isActiveRun)) {
+        startRunsPolling()
+      } else {
+        stopRunsPolling()
+      }
+      return r || []
     }catch(e){ console.error('loadRuns', e) }
+    return []
   }
 
   useEffect(()=>{ loadRuns() }, [])
+  useEffect(()=> stopRunsPolling, [])
 
   const handleRunPreview = async (id)=>{
     setRunPreview({ loading: true })

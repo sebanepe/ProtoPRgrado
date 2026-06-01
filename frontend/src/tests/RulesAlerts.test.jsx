@@ -334,7 +334,7 @@ describe('RulesAlerts page', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /Analizar y Generar Alertas/ })[0])
 
     await waitFor(() => {
-      const matchingCells = screen.getAllByRole('cell', { name: 'RULE_DOUBLE_COUNTRY_CARD_PRESENT_SAME_DAY' })
+      const matchingCells = screen.getAllByRole('cell', { name: /Tarjeta presente en dos países el mismo día/i })
       expect(matchingCells.length).toBeGreaterThan(0)
     })
   })
