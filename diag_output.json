@@ -1,0 +1,219 @@
+[diagnose] source_run=preprocessed_run_26
+{
+  "source_run_input": "preprocessed_run_26",
+  "source_run_normalized": "preprocessed_run_26",
+  "run_token": "26",
+  "generated_at": "2026-06-01T21:52:54.590257+00:00",
+  "db_status": "ERROR: (psycopg2.OperationalError) connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"protouser\"\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+  "artifact_registry_entries": [],
+  "model_registry_entries": [],
+  "paths": {
+    "isolation_scores_registered": null,
+    "isolation_scores_fallback": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\anomaly_scores_run_26.csv",
+    "isolation_scores_used": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\anomaly_scores_run_26.csv",
+    "isolation_scores_source": "fallback",
+    "autoencoder_scores": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\autoencoder_scores_run_26.csv",
+    "alerts_summary": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\alerts_summary_run_26.csv",
+    "alerts_detail": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\alerts_run_26.csv",
+    "comparison_alert_level": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\model_comparison_alert_level_run_26.csv"
+  },
+  "isolation_forest": {
+    "registered_file": {
+      "col_present": true,
+      "total_rows": 548108,
+      "flag_1": 5481,
+      "flag_0": 542627,
+      "other": 0,
+      "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\anomaly_scores_run_26.csv",
+      "path_exists": true,
+      "columns": [
+        "anomaly_run_id",
+        "source_run",
+        "transaction_id",
+        "customer_hash",
+        "transaction_datetime",
+        "amount",
+        "country_code",
+        "pos_entry_mode",
+        "has_pinblock",
+        "merchant_rubro_proxy",
+        "anomaly_model_name",
+        "anomaly_score",
+        "anomaly_rank",
+        "anomaly_flag",
+        "anomaly_percentile",
+        "created_at"
+      ]
+    },
+    "fallback_file": {
+      "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\anomaly_scores_run_26.csv",
+      "path_exists": true,
+      "note": "same as registered path"
+    },
+    "path_mismatch": false
+  },
+  "autoencoder": {
+    "col_present": true,
+    "total_rows": 10000,
+    "flag_1": 100,
+    "flag_0": 9900,
+    "other": 0,
+    "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\autoencoder_scores_run_26.csv",
+    "path_exists": true,
+    "columns": [
+      "source_run",
+      "transaction_id",
+      "customer_hash",
+      "transaction_datetime",
+      "amount",
+      "country_code",
+      "merchant_rubro_proxy",
+      "reconstruction_error",
+      "autoencoder_anomaly_score",
+      "autoencoder_anomaly_flag",
+      "anomaly_rank"
+    ]
+  },
+  "alerts_summary": {
+    "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\alerts_summary_run_26.csv",
+    "exists": true,
+    "total_rows": 20040,
+    "has_child_transaction_ids": true,
+    "unique_child_txs": 36386
+  },
+  "isolation_overlap": {
+    "using_registered_file": {
+      "iso_flagged_count": 5481,
+      "child_tx_overlap": 2222,
+      "alerts_with_if_anomaly_child": 1517
+    },
+    "using_fallback_file": {
+      "iso_flagged_count": 5481,
+      "child_tx_overlap": 2222,
+      "alerts_with_if_anomaly_child": 1517
+    }
+  },
+  "autoencoder_overlap": {
+    "auto_flagged_count": 100,
+    "child_tx_overlap": 39,
+    "alerts_with_autoencoder_anomaly_child": 76
+  },
+  "supervised": {
+    "logistic_regression": {
+      "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\supervised_human_logistic_regression_predictions_run_26.csv",
+      "path_exists": true,
+      "source": "fallback",
+      "total_rows": 12,
+      "y_pred_value_counts": {
+        "0": 6,
+        "1": 6
+      },
+      "positive_ids": [
+        "26-S-34e13e254a05",
+        "26-S-0202c10107c4",
+        "26-S-d615a62ca630",
+        "26-S-95df8da4ec21",
+        "26-S-fcfbe51e61f3",
+        "26-S-9028134b4235"
+      ],
+      "overlap_with_alerts_summary": 12
+    },
+    "random_forest": {
+      "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\supervised_human_random_forest_predictions_run_26.csv",
+      "path_exists": true,
+      "source": "fallback",
+      "total_rows": 12,
+      "y_pred_value_counts": {
+        "0": 6,
+        "1": 6
+      },
+      "positive_ids": [
+        "26-S-34e13e254a05",
+        "26-S-0202c10107c4",
+        "26-S-d615a62ca630",
+        "26-S-95df8da4ec21",
+        "26-S-fcfbe51e61f3",
+        "26-S-9028134b4235"
+      ],
+      "overlap_with_alerts_summary": 12
+    },
+    "gradient_boosting": {
+      "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\supervised_human_gradient_boosting_predictions_run_26.csv",
+      "path_exists": true,
+      "source": "fallback",
+      "total_rows": 12,
+      "y_pred_value_counts": {
+        "0": 7,
+        "1": 5
+      },
+      "positive_ids": [
+        "26-S-34e13e254a05",
+        "26-S-0202c10107c4",
+        "26-S-d615a62ca630",
+        "26-S-95df8da4ec21",
+        "26-S-9028134b4235"
+      ],
+      "overlap_with_alerts_summary": 12
+    }
+  },
+  "supervised_positive_any_count": 6,
+  "supervised_positive_ids": [
+    "26-S-0202c10107c4",
+    "26-S-34e13e254a05",
+    "26-S-9028134b4235",
+    "26-S-95df8da4ec21",
+    "26-S-d615a62ca630",
+    "26-S-fcfbe51e61f3"
+  ],
+  "existing_comparison_output": {
+    "path": "C:\\Users\\seban\\Documents\\GitHub\\Sistema-GIS-La-Paz-Microservicios\\ProtoPRgrado\\data\\processed\\model_comparison_alert_level_run_26.csv",
+    "exists": true,
+    "total_rows": 20040,
+    "sup_plain_cols_found": [],
+    "sup_x_y_cols_found": [
+      "logistic_y_pred_x",
+      "logistic_y_proba_x",
+      "logistic_y_pred_y",
+      "logistic_y_proba_y",
+      "random_forest_y_pred_x",
+      "random_forest_y_proba_x",
+      "random_forest_y_pred_y",
+      "random_forest_y_proba_y",
+      "gradient_boosting_y_pred_x",
+      "gradient_boosting_y_proba_x",
+      "gradient_boosting_y_pred_y",
+      "gradient_boosting_y_proba_y"
+    ],
+    "bug_b_detected": true,
+    "has_isolation_forest_anomaly_child_true_count": 0,
+    "has_autoencoder_anomaly_child_true_count": 76,
+    "supervised_positive_any_true_count": 0
+  },
+  "diagnoses": [
+    {
+      "id": "BUG_A_METADATA_EVIDENCE",
+      "severity": "CRITICAL",
+      "title": "Isolation Forest: Bug A confirmado por metadata de ejecucion previa (DB no disponible ahora)",
+      "detail": "NOTA: El metadata de la ultima ejecucion muestra total_records=10000 para Isolation Forest, mientras el fallback tiene 548108 filas. Esto confirma Bug A cuando DB estaba disponible.",
+      "impact": "iso_flags vacio en la ultima ejecucion -> isolation_anomalies=0. Archivo correcto (fallback/registrado) tiene 5481 transacciones flagged, 2222 tx overlap con alertas, 1517 alertas con hijo IF-anomalo."
+    },
+    {
+      "id": "BUG_B",
+      "severity": "CRITICAL",
+      "title": "Merge supervisado genera sufijos _x/_y: supervised_positive_any siempre False",
+      "detail": "Columnas con sufijo _x/_y encontradas: ['logistic_y_pred_x', 'logistic_y_proba_x', 'logistic_y_pred_y', 'logistic_y_proba_y', 'random_forest_y_pred_x', 'random_forest_y_proba_x']... Columnas 'logistic_y_pred' (plain) encontradas: []. El c\u00f3digo pre-crea las columnas como None antes del merge, causando conflicto de nombres.",
+      "impact": "supervised_positive_any=True para 0/20040 alertas. Real: 6 alertas con y_pred>=1."
+    },
+    {
+      "id": "STRUCTURAL_SUPERVISED_TEST_ONLY",
+      "severity": "INFO",
+      "title": "Supervisados: predicciones solo sobre test set (limitaci\u00f3n de dise\u00f1o)",
+      "detail": "Los 3 modelos supervisados tienen predicciones sobre 36 alertas en total (test set etiquetado), no sobre las 20040 alertas totales del summary.",
+      "impact": "Incluso corrigiendo Bug B, solo ~6 alertas tendr\u00e1n supervised_positive_any=True. Esto es el m\u00ednimo t\u00e9cnico esperado."
+    }
+  ]
+}
+[diagnose] Reporte markdown generado: C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\data\processed\model_evaluation_diagnostic_run_26.md
+
+[diagnose] 2 bug(s) crítico(s) encontrado(s).
+

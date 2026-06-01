@@ -314,4 +314,35 @@ export async function getAutoencoderModelMetadata(sourceRun){
   return api.get('/api/anomaly/autoencoder/model-metadata', { params: { source_run: sourceRun } }).then(r => r.data)
 }
 
+// ============================================================
+// Phase C5.2: Model Evaluation Comparison API Functions
+// ============================================================
+export async function buildModelEvaluationComparison(payload){
+  return api.post('/api/model-evaluation/build-comparison', payload).then(r => r.data)
+}
+
+export async function getModelEvaluationSummary(sourceRun){
+  return api.get('/api/model-evaluation/summary', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
+export async function getModelEvaluationAlertLevel(sourceRun, params = {}){
+  return api.get('/api/model-evaluation/alert-level', { params: { source_run: sourceRun, ...params } }).then(r => r.data)
+}
+
+export async function getModelEvaluationTransactionLevel(sourceRun, params = {}){
+  return api.get('/api/model-evaluation/transaction-level', { params: { source_run: sourceRun, ...params } }).then(r => r.data)
+}
+
+export async function getModelEvaluationReport(sourceRun){
+  return api.get('/api/model-evaluation/report', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
+export async function getModelEvaluationMetadata(sourceRun){
+  return api.get('/api/model-evaluation/metadata', { params: { source_run: sourceRun } }).then(r => r.data)
+}
+
+export async function getModelEvaluationTopCases(sourceRun, limit = 20){
+  return api.get('/api/model-evaluation/top-cases', { params: { source_run: sourceRun, limit } }).then(r => r.data)
+}
+
 export default api

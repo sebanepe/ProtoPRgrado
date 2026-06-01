@@ -134,13 +134,26 @@ def _resolve_paths(db: Session, source_run: str) -> dict[str, Any]:
             return Path(item.file_path)
         return fallback
 
+    def _pick_iso(artifact_type: str, fallback: Path, required_col: str) -> Path:
+        # Use registry path only if the file actually contains the expected column;
+        # otherwise the service silently reads the wrong artifact and returns 0 anomalies.
+        candidate = _pick(artifact_type, fallback)
+        if candidate != fallback and candidate.exists():
+            try:
+                sample = pd.read_csv(candidate, nrows=1)
+                if required_col not in sample.columns:
+                    return fallback
+            except Exception:
+                return fallback
+        return candidate
+
     paths: dict[str, Any] = {
         "source_run": normalized,
         "run_token": token,
         "alerts_summary": _pick(artifacts.ARTIFACT_RULE_SUMMARY_CSV, processed / f"alerts_summary_run_{token}.csv"),
         "alerts_detail": _pick(artifacts.ARTIFACT_RULE_ALERTS_CSV, processed / f"alerts_run_{token}.csv"),
         "rules_report": _pick(artifacts.ARTIFACT_RULE_REPORT, processed / f"rules_report_run_{token}.md"),
-        "isolation_scores": _pick(artifacts.ARTIFACT_ANOMALY_SCORES_CSV, processed / f"anomaly_scores_run_{token}.csv"),
+        "isolation_scores": _pick_iso(artifacts.ARTIFACT_ANOMALY_SCORES_CSV, processed / f"anomaly_scores_run_{token}.csv", "anomaly_flag"),
         "isolation_report": _pick(artifacts.ARTIFACT_ANOMALY_REPORT, processed / f"anomaly_report_run_{token}.md"),
         "isolation_metadata": _pick(artifacts.ARTIFACT_MODEL_METADATA, models / f"isolation_forest_run_{token}_metadata.json"),
         "autoencoder_scores": processed / f"autoencoder_scores_run_{token}.csv",
@@ -233,14 +246,14 @@ def build_model_evaluation_comparison(db: Session, source_run: str) -> dict[str,
     for model in SUPERVISED_MODELS:
         pred = supervised_frames[model]
         base = "logistic" if model == "logistic_regression" else model
+        if not pred.empty:
+            pred2 = pred[["summary_alert_id", "y_pred", "y_proba", "evaluation_result"]].copy()
+            pred2.columns = ["summary_alert_id", f"{base}_y_pred", f"{base}_y_proba", f"{base}_evaluation_result"]
+            alert_df = alert_df.merge(pred2, on="summary_alert_id", how="left")
+        # Fill after merge so column always exists without causing _x/_y name conflicts
         for col in (f"{base}_y_pred", f"{base}_y_proba", f"{base}_evaluation_result"):
             if col not in alert_df.columns:
                 alert_df[col] = None
-        if pred.empty:
-            continue
-        pred2 = pred[["summary_alert_id", "y_pred", "y_proba", "evaluation_result"]].copy()
-        pred2.columns = ["summary_alert_id", f"{base}_y_pred", f"{base}_y_proba", f"{base}_evaluation_result"]
-        alert_df = alert_df.merge(pred2, on="summary_alert_id", how="left")
 
     child_map: dict[str, list[str]] = {}
     if "child_transaction_ids" in alert_df.columns:
@@ -352,6 +365,10 @@ def build_model_evaluation_comparison(db: Session, source_run: str) -> dict[str,
     tx_df["total_signal_count"] = tx_df["flagged_by_rules"].astype(int) + tx_df["unsupervised_methods_count"]
     tx_df["comparison_priority"] = tx_df["total_signal_count"].apply(lambda x: "HIGH" if int(x) >= 2 else "MEDIUM" if int(x) == 1 else "LOW")
 
+    has_any_supervised_data = any(not f.empty for f in supervised_frames.values())
+    has_any_unsupervised_data = not iso.empty or not auto.empty
+    max_possible_agree = int(not alerts_summary.empty) + int(has_any_supervised_data) + int(has_any_unsupervised_data)
+
     metrics = {
         "rules": {
             "total_alerts_grouped": int(len(alert_df)),
@@ -379,7 +396,7 @@ def build_model_evaluation_comparison(db: Session, source_run: str) -> dict[str,
         "rules_and_autoencoder_count": int((tx_df["flagged_by_rules"] & tx_df["flagged_by_autoencoder"]).sum()),
         "isolation_and_autoencoder_count": int((tx_df["flagged_by_isolation_forest"] & tx_df["flagged_by_autoencoder"]).sum()),
         "rules_and_supervised_positive_count": int(alert_df["supervised_positive_any"].sum()) if "supervised_positive_any" in alert_df.columns else 0,
-        "all_available_methods_count": int(alert_df["methods_agree_count"].eq(3).sum()) if "methods_agree_count" in alert_df.columns else 0,
+        "all_available_methods_count": int(alert_df["methods_agree_count"].eq(max_possible_agree).sum()) if "methods_agree_count" in alert_df.columns and max_possible_agree > 1 else 0,
     }
 
     alert_df = _drop_forbidden(alert_df)
@@ -492,9 +509,9 @@ def get_alert_level(source_run: str, page: int, page_size: int, filters: dict[st
     df = _read_output_csv(source_run, "alert")
     filters = filters or {}
     for key, value in filters.items():
-        if value is None or key not in df.columns:
+        if value is None or str(value).strip() == "" or key not in df.columns:
             continue
-        df = df[df[key].astype(str) == str(value)]
+        df = df[df[key].astype(str).str.lower() == str(value).strip().lower()]
     total = len(df)
     start = max(page - 1, 0) * page_size
     items = _sanitize_records(df.iloc[start : start + page_size].to_dict(orient="records"))
@@ -505,9 +522,9 @@ def get_transaction_level(source_run: str, page: int, page_size: int, filters: d
     df = _read_output_csv(source_run, "transaction")
     filters = filters or {}
     for key, value in filters.items():
-        if value is None or key not in df.columns:
+        if value is None or str(value).strip() == "" or key not in df.columns:
             continue
-        df = df[df[key].astype(str).str.lower() == str(value).lower()]
+        df = df[df[key].astype(str).str.lower() == str(value).strip().lower()]
     total = len(df)
     start = max(page - 1, 0) * page_size
     items = _sanitize_records(df.iloc[start : start + page_size].to_dict(orient="records"))

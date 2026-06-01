@@ -33,6 +33,7 @@ def alert_level(
     human_review_status: str | None = None,
     supervised_positive_any: str | None = None,
     unsupervised_anomaly_any: str | None = None,
+    risk_level: str | None = None,
 ):
     return model_evaluation_service.get_alert_level(
         source_run,
@@ -43,6 +44,7 @@ def alert_level(
             "human_review_status": human_review_status,
             "supervised_positive_any": supervised_positive_any,
             "unsupervised_anomaly_any": unsupervised_anomaly_any,
+            "risk_level": risk_level,
         },
     )
 
@@ -55,6 +57,8 @@ def transaction_level(
     flagged_by_rules: str | None = None,
     flagged_by_isolation_forest: str | None = None,
     flagged_by_autoencoder: str | None = None,
+    country_code: str | None = None,
+    merchant_rubro_proxy: str | None = None,
 ):
     return model_evaluation_service.get_transaction_level(
         source_run,
@@ -64,6 +68,8 @@ def transaction_level(
             "flagged_by_rules": flagged_by_rules,
             "flagged_by_isolation_forest": flagged_by_isolation_forest,
             "flagged_by_autoencoder": flagged_by_autoencoder,
+            "country_code": country_code,
+            "merchant_rubro_proxy": merchant_rubro_proxy,
         },
     )
 

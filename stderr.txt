@@ -1,0 +1,13 @@
+[diagnose] source_run=preprocessed_run_26
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\backend\app\tools\diagnose_model_evaluation_comparison.py", line 728, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\backend\app\tools\diagnose_model_evaluation_comparison.py", line 708, in main
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+  File "C:\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2265' in position 7986: character maps to <undefined>

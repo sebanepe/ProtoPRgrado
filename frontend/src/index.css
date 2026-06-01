@@ -401,7 +401,7 @@ button, input, select, textarea {
 
 .simple-bar-row {
 	display: grid;
-	grid-template-columns: minmax(54px, 86px) minmax(120px, 1fr) minmax(48px, auto);
+	grid-template-columns: minmax(120px, 180px) minmax(80px, 1fr) minmax(48px, auto);
 	align-items: center;
 	gap: 10px;
 	font-size: 0.82rem;
@@ -657,6 +657,7 @@ button, input, select, textarea {
 	font-size: 12px;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
+	white-space: nowrap;
 }
 
 .table th,

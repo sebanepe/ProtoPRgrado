@@ -1,0 +1,5 @@
+[diagnose] source_run=preprocessed_run_26
+
+[diagnose] Reporte markdown generado: C:\Users\seban\Documents\GitHub\Sistema-GIS-La-Paz-Microservicios\ProtoPRgrado\data\processed\model_evaluation_diagnostic_run_26.md
+
+[diagnose] 2 bug(s) crítico(s) encontrado(s).
