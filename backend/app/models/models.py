@@ -490,3 +490,66 @@ class SystemLog(Base):
 
 
 # Note: ModelConfig moved earlier to reference `ml_models` and support advanced configs
+
+
+# ── Fase D3.1: Case Management ──────────────────────────────────────────────
+
+VALID_ORIGIN_TYPES = {"RULE_ALERT", "SCORING_RESULT", "MODEL_EVALUATION", "MANUAL"}
+VALID_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+VALID_CASE_STATUSES = {"OPEN", "IN_ANALYSIS", "ESCALATED", "CLOSED"}
+VALID_HISTORY_ACTIONS = {
+    "CASE_CREATED", "STATUS_CHANGED", "PRIORITY_CHANGED",
+    "ASSIGNED", "COMMENT_ADDED", "CASE_CLOSED", "CASE_REOPENED",
+}
+
+# Fields that must never be persisted or returned
+_FORBIDDEN_FIELDS = frozenset({
+    "is_fraud", "confirmed_fraud", "PAN_TARJETA", "TARJETA", "pan_card", "raw_card",
+})
+
+
+class CaseManagementCase(Base):
+    __tablename__ = "case_management_cases"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    case_code     = Column(String(50), unique=True, nullable=False, index=True)
+    source_run    = Column(String(255), nullable=True)
+    origin_type   = Column(String(50), nullable=False)
+    origin_ref_id = Column(String(255), nullable=True)
+    summary_alert_id = Column(String(255), nullable=True)
+    transaction_id   = Column(String(255), nullable=True)
+    scoring_run_id   = Column(String(255), nullable=True)
+    customer_hash    = Column(String(255), nullable=True)
+    title        = Column(String(500), nullable=False)
+    description  = Column(Text, nullable=True)
+    priority     = Column(String(20), nullable=False, default="MEDIUM")
+    status       = Column(String(20), nullable=False, default="OPEN")
+    assigned_to  = Column(String(255), nullable=True)
+    created_by   = Column(String(255), nullable=True)
+    closed_by    = Column(String(255), nullable=True)
+    conclusion   = Column(Text, nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+    closed_at    = Column(DateTime(timezone=True), nullable=True)
+
+
+class CaseManagementComment(Base):
+    __tablename__ = "case_management_comments"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    case_id      = Column(Integer, ForeignKey("case_management_cases.id", ondelete="CASCADE"), nullable=False)
+    user_id      = Column(String(255), nullable=True)
+    comment_text = Column(Text, nullable=False)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CaseManagementHistory(Base):
+    __tablename__ = "case_management_history"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    case_id    = Column(Integer, ForeignKey("case_management_cases.id", ondelete="CASCADE"), nullable=False)
+    action     = Column(String(50), nullable=False)
+    old_value  = Column(String(500), nullable=True)
+    new_value  = Column(String(500), nullable=True)
+    changed_by = Column(String(255), nullable=True)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
