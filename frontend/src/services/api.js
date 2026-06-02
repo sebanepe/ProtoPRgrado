@@ -114,6 +114,39 @@ export async function getBatchScoringReport(params = {}) {
 export async function getBatchScoringMetadata(params = {}) {
   return api.get('/api/scoring/metadata', { params }).then(r => r.data)
 }
+export async function getCases(params = {}) {
+  return api.get('/api/cases', { params }).then(r => r.data)
+}
+export async function getCasesSummary(params = {}) {
+  return api.get('/api/cases/summary', { params }).then(r => r.data)
+}
+export async function getCaseById(id) {
+  return api.get(`/api/cases/${id}`).then(r => r.data)
+}
+export async function createCase(payload) {
+  return api.post('/api/cases', payload).then(r => r.data)
+}
+export async function updateCase(id, payload) {
+  return api.patch(`/api/cases/${id}`, payload).then(r => r.data)
+}
+export async function addCaseComment(id, payload) {
+  return api.post(`/api/cases/${id}/comments`, payload).then(r => r.data)
+}
+export async function getCaseComments(id) {
+  return api.get(`/api/cases/${id}/comments`).then(r => r.data)
+}
+export async function getCaseHistory(id) {
+  return api.get(`/api/cases/${id}/history`).then(r => r.data)
+}
+export async function closeCase(id, payload) {
+  return api.post(`/api/cases/${id}/close`, payload).then(r => r.data)
+}
+export async function reopenCase(id) {
+  return api.post(`/api/cases/${id}/reopen`, {}).then(r => r.data)
+}
+export async function createCaseFromScoringResult(payload) {
+  return api.post('/api/cases/from-scoring-result', payload).then(r => r.data)
+}
 export async function getReportingSummary(){ return api.get('/reporting/summary').then(r=> r.data).catch(()=>null) }
 export async function getUsers(){ return api.get('/users').then(r=> r.data && r.data.users ? r.data.users : []) }
 export async function createUser(payload){ return api.post('/users', payload).then(r=> r.data) }
