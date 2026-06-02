@@ -710,7 +710,7 @@ button, input, select, textarea {
 	padding: 12px 14px;
 	border-bottom: 1px solid rgba(36, 52, 71, 0.78);
 	vertical-align: middle;
-	word-break: break-word;
+	white-space: nowrap;
 }
 
 .table tbody tr:hover {

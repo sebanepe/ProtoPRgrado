@@ -11,7 +11,7 @@ import {
 } from '../services/api'
 
 const DEFAULT_SOURCE_RUN = 'preprocessed_run_26'
-const FORBIDDEN_COLUMNS = new Set(['is_fraud', 'confirmed_fraud', 'PAN_TARJETA', 'TARJETA', 'pan_card', 'raw_card'])
+const FORBIDDEN_COLUMNS = new Set(['is_fraud', 'confirmed_fraud', 'PAN_TARJETA', 'TARJETA', 'pan_card', 'raw_card', 'child_alert_ids', 'child_transaction_ids'])
 const REQUIRED_MESSAGE = 'Las reglas, anomalias y predicciones son senales de apoyo analitico. Ninguna constituye fraude confirmado automatico. La confirmacion depende de revision humana.'
 
 const MODEL_LABELS = {
@@ -324,9 +324,11 @@ export default function ModelEvaluation() {
       </div>
 
       <div className="card" data-testid="report-section">
-        <h3>Reporte tecnico de evaluacion comparativa</h3>
-        <p>Este reporte documenta los metodos disponibles, metricas, intersecciones, limitaciones y advertencias.</p>
-        <pre className="report-pre">{report || 'No hay reporte disponible para este run.'}</pre>
+        <details className="technical-details">
+          <summary>Reporte tecnico de evaluacion comparativa</summary>
+          <p>Este reporte documenta los metodos disponibles, metricas, intersecciones, limitaciones y advertencias.</p>
+          <pre className="report-pre">{report || 'No hay reporte disponible para este run.'}</pre>
+        </details>
       </div>
 
       <div className="card" data-testid="metadata-section">
