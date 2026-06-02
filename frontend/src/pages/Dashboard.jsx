@@ -238,7 +238,7 @@ export default function Dashboard() {
   const casesByPriority = CASE_PRIORITIES.reduce((acc, key) => ({ ...acc, [key]: Number(state.casesSummary?.by_priority?.[key]) || 0 }), {})
   const modelRows = buildModelRows(state)
   const trainedModels = modelRows.filter((row) => row.available).length
-  const latestRun = state.preprocessedRuns[0]
+  const latestRun = state.preprocessedRuns.at(-1) ?? null
 
   const phaseCards = [
     {

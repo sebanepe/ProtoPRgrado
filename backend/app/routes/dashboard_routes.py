@@ -54,13 +54,16 @@ def _run_token(run_id: Optional[str]) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _default_source_run() -> str:
-    summaries = sorted(_processed_dir().glob("alerts_summary_run_*.csv"), key=lambda item: item.stat().st_mtime, reverse=True)
+def _default_source_run() -> Optional[str]:
+    try:
+        summaries = sorted(_processed_dir().glob("alerts_summary_run_*.csv"), key=lambda item: item.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
     if summaries:
         token = _run_token(summaries[0].stem)
         if token:
             return f"preprocessed_run_{token}"
-    return "preprocessed_run_26"
+    return None
 
 
 def _source_run_aliases(source_run: str) -> set[str]:
@@ -323,9 +326,33 @@ def dashboard_overview(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     resolved_source_run = source_run or _default_source_run()
+    warnings: list[str] = []
+
+    if resolved_source_run is None:
+        warnings.append("No hay datos procesados disponibles. Importe un dataset y ejecute el preprocesamiento primero.")
+        return {
+            "source_run": None,
+            "anomaly_run": None,
+            "total_transactions": 0,
+            "active_alerts": 0,
+            "average_risk_score": None,
+            "active_model": None,
+            "review_distribution": {
+                "confirmed_fraud": 0,
+                "dismissed": 0,
+                "in_review": 0,
+                "new": 0,
+                "false_positive_excluded": 0,
+                "total_reviews": 0,
+                "usable_total_labels": 0,
+            },
+            "alerts_evolution": [],
+            "recent_alerts": [],
+            "warnings": warnings,
+        }
+
     anomaly_service = AnomalyService(processed_dir=str(_processed_dir()), models_dir=str(_models_dir()))
     resolved_anomaly_run = _select_anomaly_run(anomaly_run, resolved_source_run, anomaly_service)
-    warnings: list[str] = []
 
     active_model, total_transactions = _build_active_model(resolved_anomaly_run, anomaly_service, warnings)
 
