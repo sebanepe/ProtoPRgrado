@@ -138,7 +138,7 @@ describe('CaseManagement - Fase D3.2', () => {
 
   it('muestra tabla de casos', async () => {
     await renderCases()
-    expect(screen.getByText('CASE-202606-00001')).toBeTruthy()
+    expect(await screen.findByText('CASE-202606-00001')).toBeTruthy()
     expect(screen.getByText('Caso scoring alto')).toBeTruthy()
   })
 
