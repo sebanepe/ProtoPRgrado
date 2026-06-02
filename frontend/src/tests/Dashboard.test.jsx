@@ -91,7 +91,7 @@ describe('Dashboard General', () => {
     expect(screen.getByText('Isolation Forest')).toBeTruthy()
     expect(screen.getByText('Autoencoder PyTorch')).toBeTruthy()
     expect(screen.getByText('Últimos scorings')).toBeTruthy()
-    expect(screen.getByText('random_forest')).toBeTruthy()
+    expect(await screen.findByText('random_forest')).toBeTruthy()
     expect(screen.getByText('Resumen de casos')).toBeTruthy()
     expect(screen.getByText('Casos por estado')).toBeTruthy()
   })
