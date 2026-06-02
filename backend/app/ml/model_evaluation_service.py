@@ -9,6 +9,11 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from backend.app.ml.batch_scoring_service import (
+    _feature_frame_for_scoring,
+    _load_model,
+    _predict,
+)
 from backend.app.models.models import ModelRegistry, RuleAlertReview
 from backend.app.services import artifact_registry_service as artifacts
 
@@ -184,6 +189,17 @@ def _resolve_paths(db: Session, source_run: str) -> dict[str, Any]:
     return paths
 
 
+def _run_full_supervised_inference(
+    alert_df: pd.DataFrame,
+    db: Session,
+    normalized: str,
+    algorithm: str,
+) -> tuple[list[int], list[float] | None]:
+    model, feature_columns, _ = _load_model(db, normalized, algorithm)
+    X = _feature_frame_for_scoring(alert_df, feature_columns)
+    return _predict(model, X)
+
+
 def build_model_evaluation_comparison(db: Session, source_run: str) -> dict[str, Any]:
     paths = _resolve_paths(db, source_run)
     normalized = paths["source_run"]
@@ -254,6 +270,19 @@ def build_model_evaluation_comparison(db: Session, source_run: str) -> dict[str,
         for col in (f"{base}_y_pred", f"{base}_y_proba", f"{base}_evaluation_result"):
             if col not in alert_df.columns:
                 alert_df[col] = None
+
+    # Full inference: apply trained models to ALL alerts (overrides sparse test-set CSV predictions)
+    for model in SUPERVISED_MODELS:
+        base = "logistic" if model == "logistic_regression" else model
+        pred_col = f"{base}_y_pred"
+        proba_col = f"{base}_y_proba"
+        try:
+            y_pred_all, y_proba_all = _run_full_supervised_inference(alert_df, db, normalized, model)
+            alert_df[pred_col] = y_pred_all
+            if y_proba_all is not None:
+                alert_df[proba_col] = [round(float(p), 4) for p in y_proba_all]
+        except Exception:
+            pass  # Model not registered or not AVAILABLE — keep CSV values (or None)
 
     child_map: dict[str, list[str]] = {}
     if "child_transaction_ids" in alert_df.columns:
