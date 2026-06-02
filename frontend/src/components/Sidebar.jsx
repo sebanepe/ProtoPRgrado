@@ -7,7 +7,7 @@ const sections = [
   { title: 'Fase B: Alertas del Sistema', items: [{ to: '/rules-alerts', label: 'Reglas y Alertas' }] },
   { title: 'Fase C: Modelos', items: [{ to: '/models/unsupervised', label: 'No Supervisados' }, { to: '/models/supervised', label: 'Supervisados' }, { to: '/models/evaluation', label: 'Evaluación de Modelos' }] },
   { title: 'Fase D: Monitoreo', items: [{ to: '/monitoring/scoring', label: 'Scoring por Lotes' }, { to: '/monitoring/cases', label: 'Manejo de Casos' }] },
-  { title: 'Administración', items: [{ to: '/users', label: 'Usuarios' }] },
+  { title: 'Administración', items: [{ to: '/admin/users', label: 'Usuarios' }] },
 ]
 
 export default function Sidebar() {

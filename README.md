@@ -1,74 +1,289 @@
-# sistema-deteccion-monitoreo-fraude
+# Sistema de Detección y Monitoreo de Fraude Bancario
 
-Proyecto prototipo académico para detección de fraude bancario utilizando machine learning.
+Prototipo académico para detección de fraude bancario con machine learning. Incluye pipeline de datos (Fase A), alertas (Fase B), modelos supervisados/no supervisados (Fase C), monitoreo en tiempo real (Fase D) y administración de usuarios.
 
-Estructura básica creada para un prototipo con API en FastAPI, conexión a PostgreSQL mediante SQLAlchemy, validación con Pydantic y componentes modulares para modelos, esquemas, repositorios, servicios y ML.
+---
 
-Cómo ejecutar (desarrollo):
+## Requisitos previos
 
-1. Crear y activar un entorno virtual (por ejemplo, `python -m venv .venv`).
-2. Instalar dependencias:
+| Herramienta | Versión mínima | Para qué |
+|---|---|---|
+| Docker | 24+ | Base de datos PostgreSQL y backend |
+| Docker Compose | v2 (`docker compose`) | Orquestación de servicios |
+| Python | 3.11+ | Entorno virtual y tests desde el host |
+| Node.js | 18+ | Frontend React |
+
+> El backend corre dentro de Docker. Python en el host solo es necesario para ejecutar tests localmente o scripts de migración desde fuera del contenedor.
+
+---
+
+## Instalación desde cero
+
+### 1. Clonar el repositorio
 
 ```bash
+git clone <url-del-repo>
+cd ProtoPRgrado
+```
+
+### 2. Verificar el archivo `.env`
+
+El repositorio incluye un `.env` con valores por defecto para desarrollo local:
+
+```
+DATABASE_URL=postgresql://protouser:protopass@127.0.0.1:5432/protodb
+APP_ENV=development
+SECRET_KEY=change_me
+```
+
+Este archivo es leído por el backend cuando se ejecuta desde el host. El contenedor Docker usa sus propias variables definidas en `docker-compose.yml` y no depende de este `.env`.
+
+### 3. Crear entorno virtual Python (para tests y scripts en el host)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-3. Configurar la variable de entorno `DATABASE_URL` (opcional). Por defecto se usa:
+### 4. Instalar dependencias del frontend
 
-```
-postgresql://postgres:password@localhost:5432/fraud_db
+```powershell
+cd frontend
+npm install
+cd ..
 ```
 
-4. Ejecutar la API:
+---
+
+## Levantar los servicios
+
+### Paso 1: Iniciar la base de datos
 
 ```bash
-uvicorn backend.app.main:app --reload --port 8000
+docker compose up -d db
 ```
 
-Notas:
-- Este repositorio contiene un prototipo académico y no está listo para producción.
-- Las carpetas `data/`, `notebooks/` y `powerbi/` están reservadas para datos, experimentos y reportes.
-
-Docker / Desarrollo (con Docker Compose):
-
-- Requisitos: `docker` y `docker compose` instalados.
-- Levantar servicios (Postgres, pgAdmin, backend):
+Espera unos segundos para que PostgreSQL esté listo. Puedes verificar con:
 
 ```bash
-docker compose up -d db pgadmin backend
+docker compose logs db --tail 10
 ```
 
-- Inicializar la base de datos y sembrar datos (ejecutar dentro del contenedor `backend` para evitar problemas de puertos/credenciales en la máquina host):
+Cuando veas `database system is ready to accept connections`, continúa.
+
+### Paso 2: Iniciar el backend
+
+```bash
+docker compose up -d backend
+```
+
+El backend sirve la API en `http://localhost:8000`.
+
+> El contenedor monta `./backend` como volumen (`./backend:/app/backend`), por lo que los cambios en el código Python se aplican sin reconstruir la imagen. Solo necesitas reiniciar el contenedor: `docker compose restart backend`.
+
+### Paso 3: Inicializar la base de datos
+
+Este comando crea todas las tablas, siembra roles, permisos y crea el usuario administrador por defecto:
 
 ```bash
 docker compose exec backend python -m backend.app.init_db
 ```
 
-- Alternativa (ejecución desde host):
-	- Asegúrate de que el puerto mapeado en `docker-compose.yml` no esté siendo usado por una instancia local de Postgres. Si hay conflicto, cambia el mapeo (por ejemplo `"5433:5432"`) y actualiza `DATABASE_URL`.
-	- Exportar la variable y ejecutar el script de inicialización desde tu venv (PowerShell ejemplo):
+Deberías ver una salida como:
 
-```powershell
-$env:DATABASE_URL = "postgresql://protouser:protopass@127.0.0.1:5432/protodb"
-.\.venv\Scripts\python.exe -m backend.app.init_db
+```
+Roles: ['ADMIN', 'DATA_SCIENTIST', 'FRAUD_ANALYST']
+Permissions: ['dashboard.view', 'dataset.view', ...] ... total 29
+Created default admin: sebanpb@gmail.com
 ```
 
-- Ejecutar tests por interprete de venv (raiz de repo):
+> **Solo se necesita ejecutar `init_db` una vez** (o cada vez que quieras restablecer roles/permisos sin borrar datos). Es idempotente: no duplica registros si ya existen.
+
+### Paso 4: Iniciar el frontend
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q
+cd frontend
+npm run dev
 ```
-- Ejecutar tests dentro del contenedor (rápido y fiable):
+
+El frontend estará disponible en `http://localhost:5173`.
+
+---
+
+## Credenciales de acceso por defecto
+
+| Campo | Valor |
+|---|---|
+| Email | `sebanpb@gmail.com` |
+| Contraseña | `mariokart8$` |
+
+Estas credenciales se configuran en `backend/app/init_db.py` mediante las variables de entorno `DEFAULT_ADMIN_EMAIL` y `DEFAULT_ADMIN_PASSWORD`. Puedes sobreescribirlas antes de ejecutar `init_db`.
+
+---
+
+## Migraciones de base de datos
+
+### ¿Cuándo aplico migraciones?
+
+- **Instalación fresca**: `init_db.py` crea el esquema completo con `SQLAlchemy create_all`. No necesitas correr migraciones.
+- **Base de datos existente**: Si ya tenías datos y el esquema evolucionó, debes aplicar las migraciones pendientes para agregar las nuevas columnas sin perder los datos.
+
+### Migraciones disponibles
+
+| Archivo | Qué hace |
+|---|---|
+| `backend/migrations/0002_add_dataset_id_to_transactions.sql` | Agrega `dataset_id` a transacciones |
+| `backend/migrations/0003_add_smote_pipeline_to_feature_sets.sql` | Columnas de pipeline SMOTE |
+| `backend/migrations/0004_add_ip_useragent_to_system_logs.sql` | IP y user-agent en logs |
+| `backend/migrations/0005_add_dataset_timestamps.sql` | Timestamps en datasets |
+| `backend/migrations/0006_add_username_to_users.sql` | Agrega `username` y `updated_at` a usuarios |
+
+### Cómo aplicar una migración
+
+Desde PowerShell (sin soporte para `<` con ejecutables nativos, usa `-c`):
+
+```powershell
+# Ejemplo: migration 0006
+docker compose exec db psql -U protouser -d protodb -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(100) UNIQUE; CREATE INDEX IF NOT EXISTS ix_users_username ON users (username); ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"
+```
+
+O usando pipe con `Get-Content`:
+
+```powershell
+Get-Content backend/migrations/0006_add_username_to_users.sql | docker compose exec -T db psql -U protouser -d protodb
+```
+
+Después de aplicar cualquier migración que afecte usuarios, ejecuta `init_db` para actualizar el admin:
+
+```powershell
+docker compose exec backend python -m backend.app.init_db
+docker compose restart backend
+```
+
+---
+
+## Ejecutar tests
+
+### Backend (dentro del contenedor — recomendado)
 
 ```bash
 docker compose exec backend pytest -q
 ```
 
-- Acceder a pgAdmin (por defecto mapeado en el host):
-	- URL: http://localhost:8080
-	- Usuario: el valor de `PGADMIN_DEFAULT_EMAIL` en `docker-compose.yml` (por defecto `sebanpb@gmail.com`)
-	- Contraseña: el valor de `PGADMIN_DEFAULT_PASSWORD` en `docker-compose.yml` (por defecto `Mariokart8$`)
+Para correr solo tests de integración o unitarios:
 
-- Notas sobre autenticación y puertos:
-	- Si tu máquina host ya ejecuta Postgres en el puerto `5432`, conecta el servicio `db` a otro puerto (por ejemplo `5433:5432`) para evitar que las conexiones desde el host sean atendidas por la instancia local.
-	- Ejecutar `init_db` dentro del contenedor evita diferencias de `pg_hba.conf` y credenciales entre host y contenedor.
+```bash
+docker compose exec backend pytest backend/app/tests/unit -q
+docker compose exec backend pytest backend/app/tests/integration -q
+```
+
+### Backend (desde el host con venv activo)
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+```
+
+> Los tests usan SQLite en memoria por defecto. Para apuntar al PostgreSQL real del contenedor, establece `TEST_USE_REAL_DB=1` antes de correr pytest. Los tests **nunca escriben** en `data/processed` ni `data/uploads` del proyecto — las rutas se redirigen a directorios temporales automáticamente.
+
+### Frontend
+
+```powershell
+cd frontend
+npm test -- --run
+```
+
+Para build de producción:
+
+```powershell
+npm run build
+```
+
+---
+
+## Acceso a pgAdmin
+
+Interfaz web de administración de PostgreSQL, útil para inspeccionar datos:
+
+- URL: `http://localhost:8080`
+- Usuario: `sebanpb@gmail.com`
+- Contraseña: `Mariokart8$`
+
+Para agregar el servidor dentro de pgAdmin:
+- Host: `db`
+- Puerto: `5432`
+- Base de datos: `protodb`
+- Usuario: `protouser`
+- Contraseña: `protopass`
+
+---
+
+## Referencia rápida de comandos
+
+```bash
+# Levantar todo
+docker compose up -d db backend
+
+# Ver logs del backend
+docker compose logs backend -f
+
+# Reiniciar backend tras cambios en código Python
+docker compose restart backend
+
+# Reconstruir imagen tras cambios en Dockerfile o requirements.txt
+docker compose build backend && docker compose up -d backend
+
+# Inicializar / restaurar roles, permisos y admin
+docker compose exec backend python -m backend.app.init_db
+
+# Ejecutar todos los tests en el contenedor
+docker compose exec backend pytest -q
+
+# Detener todos los servicios
+docker compose down
+
+# Detener y borrar volúmenes (borra todos los datos de PostgreSQL)
+docker compose down -v
+```
+
+---
+
+## Estructura del proyecto
+
+```
+ProtoPRgrado/
+├── backend/
+│   ├── app/
+│   │   ├── main.py          # Punto de entrada FastAPI
+│   │   ├── init_db.py       # Script de inicialización (tablas, roles, admin)
+│   │   ├── models/          # Modelos SQLAlchemy
+│   │   ├── routes/          # Endpoints por fase (dataset, preprocessing, etc.)
+│   │   ├── services/        # Lógica de negocio
+│   │   ├── repositories/    # Acceso a datos
+│   │   ├── schemas/         # Esquemas Pydantic
+│   │   ├── ml/              # Módulos de machine learning
+│   │   └── tests/           # Tests unitarios, integración y regresión
+│   ├── migrations/          # Scripts SQL idempotentes (ALTER TABLE IF NOT EXISTS)
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── pages/           # Pantallas (Dashboard, Usuarios, etc.)
+│   │   ├── components/      # Componentes reutilizables
+│   │   └── services/api.js  # Cliente HTTP hacia el backend
+│   └── package.json
+├── data/
+│   ├── uploads/             # CSVs subidos por el usuario (en Docker: /app/data/uploads)
+│   └── processed/           # Resultados de preprocesamiento (en Docker: /app/data/processed)
+├── docker-compose.yml
+└── .env                     # Variables de entorno locales (no se usa dentro de Docker)
+```
+
+---
+
+## Notas adicionales
+
+- **Cambios en código Python**: solo requieren `docker compose restart backend` (el volumen monta el código en vivo).
+- **Cambios en `requirements.txt` o `Dockerfile`**: requieren `docker compose build backend`.
+- **Puerto 5432 ocupado**: si tu máquina ya tiene PostgreSQL local, cambia el mapeo en `docker-compose.yml` (por ejemplo `"5433:5432"`) y actualiza `DATABASE_URL` en `.env`.
+- **Los tests son seguros**: nunca tocan la base de datos de producción ni el sistema de archivos del proyecto. Usan SQLite en memoria y directorios temporales.
+- **Autenticación**: usa `Authorization: Bearer <token>` (JWT) o el header legacy `X-User-Email` para requests autenticados.

@@ -28,6 +28,8 @@ class User(Base):
     failed_login_attempts = Column(Integer, nullable=False, default=0)
     locked_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    username = Column(String(100), unique=True, nullable=True, index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
     logs = relationship("SystemLog", back_populates="user", cascade="all, delete-orphan")
 

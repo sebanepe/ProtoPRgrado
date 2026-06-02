@@ -17,10 +17,10 @@ def test_input_or_dataset_required(tmp_path):
         build_training_dataset.build_training_dataset()
 
 
-def test_build_from_csv_creates_outputs(tmp_path):
+def test_build_from_csv_creates_outputs(tmp_path, monkeypatch):
     csv_path = tmp_path / "sample.csv"
     make_sample_csv(csv_path)
-    os.environ["PROJECT_PROCESSED_DIR"] = str(tmp_path)
+    monkeypatch.setattr(build_training_dataset, "PROJECT_PROCESSED_DIR", str(tmp_path))
     feature_path, report_path = build_training_dataset.build_training_dataset(input_csv=str(csv_path), chunksize=1, out_name="testrun")
     assert os.path.exists(feature_path)
     assert os.path.exists(report_path)

@@ -148,10 +148,14 @@ export async function createCaseFromScoringResult(payload) {
   return api.post('/api/cases/from-scoring-result', payload).then(r => r.data)
 }
 export async function getReportingSummary(){ return api.get('/reporting/summary').then(r=> r.data).catch(()=>null) }
-export async function getUsers(){ return api.get('/users').then(r=> r.data && r.data.users ? r.data.users : []) }
-export async function createUser(payload){ return api.post('/users', payload).then(r=> r.data) }
-export async function updateUser(id, payload){ return api.put(`/users/${id}`, payload).then(r=> r.data) }
-export async function toggleUserStatus(id){ return api.post(`/users/${id}/toggle-status`).then(r=> r.data) }
+export async function getUsers(params = {}){ return api.get('/api/users', { params }).then(r => Array.isArray(r.data) ? r.data : (r.data && r.data.users ? r.data.users : [])) }
+export async function getUserById(id){ return api.get(`/api/users/${id}`).then(r => r.data) }
+export async function createUser(payload){ return api.post('/api/users', payload).then(r => r.data) }
+export async function updateUser(id, payload){ return api.patch(`/api/users/${id}`, payload).then(r => r.data) }
+export async function activateUser(id){ return api.post(`/api/users/${id}/activate`).then(r => r.data) }
+export async function deactivateUser(id){ return api.post(`/api/users/${id}/deactivate`).then(r => r.data) }
+export async function getRoles(){ return api.get('/api/roles').then(r => Array.isArray(r.data) ? r.data : (r.data && r.data.roles ? r.data.roles : [])) }
+export async function getRolePermissions(roleId){ return api.get(`/api/roles/${roleId}/permissions`).then(r => Array.isArray(r.data) ? r.data : (r.data && r.data.permissions ? r.data.permissions : [])) }
 export async function getAlerts(filters){ return api.get('/alerts', { params: filters }).then(r=> r.data && r.data.alerts ? r.data.alerts : []) }
 export async function updateAlertStatus(alertId, status){ return api.patch(`/alerts/${alertId}/status`, null, { params: { status } }).then(r=> r.data) }
 export async function me(){ return api.get('/auth/me').then(r=> r.data).catch(()=>null) }

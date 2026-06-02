@@ -82,7 +82,8 @@ function App() {
           <Route path="/monitoring/scoring" element={<BatchScoring />} />
           <Route path="/monitoring/cases" element={<Cases />} />
           <Route path="/rules-alerts" element={<RulesAlerts />} />
-          <Route path="/users" element={<Users />} />
+          <Route path="/admin/users" element={<Users />} />
+          <Route path="/users" element={<Navigate to="/admin/users" replace />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

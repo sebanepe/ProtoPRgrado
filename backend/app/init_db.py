@@ -212,29 +212,59 @@ def ensure_admin_user(session: Session, roles: dict):
     try:
         row = conn.execute(text("SELECT id FROM users WHERE email = :email"), {"email": DEFAULT_ADMIN_EMAIL}).fetchone()
         if row:
+            # Ensure existing admin has a username set
+            try:
+                with engine.begin() as trans:
+                    trans.execute(
+                        text("UPDATE users SET username = 'admin' WHERE email = :email AND (username IS NULL OR username = '')"),
+                        {"email": DEFAULT_ADMIN_EMAIL},
+                    )
+            except Exception:
+                pass
             print("Admin user already exists:", DEFAULT_ADMIN_EMAIL)
             return None
         # create user via raw INSERT to avoid ORM column mismatch
         hashed = hash_password(DEFAULT_ADMIN_PASSWORD)
-        with engine.begin() as trans:
-            trans.execute(
-                text(
-                    "INSERT INTO users (full_name, email, password_hash, role, is_active, failed_login_attempts, created_at) VALUES (:full_name, :email, :password_hash, :role, :is_active, :failed_login_attempts, CURRENT_TIMESTAMP)"
-                ),
-                {
-                    "full_name": "Initial Admin",
-                    "email": DEFAULT_ADMIN_EMAIL,
-                    "password_hash": hashed,
-                    "role": "ADMIN",
-                    "is_active": True,
-                    "failed_login_attempts": 0,
-                },
-            )
+        # Try INSERT with username column; fall back if column does not exist yet
+        try:
+            with engine.begin() as trans:
+                trans.execute(
+                    text(
+                        "INSERT INTO users (full_name, email, password_hash, role, username, is_active, failed_login_attempts, created_at)"
+                        " VALUES (:full_name, :email, :password_hash, :role, :username, :is_active, :failed_login_attempts, CURRENT_TIMESTAMP)"
+                    ),
+                    {
+                        "full_name": "Initial Admin",
+                        "email": DEFAULT_ADMIN_EMAIL,
+                        "password_hash": hashed,
+                        "role": "ADMIN",
+                        "username": "admin",
+                        "is_active": True,
+                        "failed_login_attempts": 0,
+                    },
+                )
+        except Exception:
+            with engine.begin() as trans:
+                trans.execute(
+                    text(
+                        "INSERT INTO users (full_name, email, password_hash, role, is_active, failed_login_attempts, created_at)"
+                        " VALUES (:full_name, :email, :password_hash, :role, :is_active, :failed_login_attempts, CURRENT_TIMESTAMP)"
+                    ),
+                    {
+                        "full_name": "Initial Admin",
+                        "email": DEFAULT_ADMIN_EMAIL,
+                        "password_hash": hashed,
+                        "role": "ADMIN",
+                        "is_active": True,
+                        "failed_login_attempts": 0,
+                    },
+                )
         # optionally set role_id if column exists and role provided
         admin_role = roles.get("ADMIN")
         if admin_role:
             try:
-                conn.execute(text("UPDATE users SET role_id = :role_id WHERE email = :email"), {"role_id": admin_role.id, "email": DEFAULT_ADMIN_EMAIL})
+                with engine.begin() as trans:
+                    trans.execute(text("UPDATE users SET role_id = :role_id WHERE email = :email"), {"role_id": admin_role.id, "email": DEFAULT_ADMIN_EMAIL})
             except Exception:
                 pass
         print("Created default admin:", DEFAULT_ADMIN_EMAIL)
