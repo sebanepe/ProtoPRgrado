@@ -124,42 +124,14 @@ Estas credenciales se configuran en `backend/app/init_db.py` mediante las variab
 
 ## Migraciones de base de datos
 
-### ¿Cuándo aplico migraciones?
+`init_db.py` incluye todas las migraciones de manera idempotente (`ADD COLUMN IF NOT EXISTS`). Solo necesitas ejecutar el paso 3 de arriba y el esquema queda completo:
 
-- **Instalación fresca**: `init_db.py` crea el esquema completo con `SQLAlchemy create_all`. No necesitas correr migraciones.
-- **Base de datos existente**: Si ya tenías datos y el esquema evolucionó, debes aplicar las migraciones pendientes para agregar las nuevas columnas sin perder los datos.
+- **Instalación fresca**: `create_all` crea todas las tablas con el esquema actual, las funciones de migración son no-ops.
+- **Base de datos existente con datos**: `create_all` no toca las tablas existentes, las funciones de migración agregan únicamente las columnas que faltan sin borrar datos.
 
-### Migraciones disponibles
+En ambos casos: **un solo `docker compose exec backend python -m backend.app.init_db` es suficiente**.
 
-| Archivo | Qué hace |
-|---|---|
-| `backend/migrations/0002_add_dataset_id_to_transactions.sql` | Agrega `dataset_id` a transacciones |
-| `backend/migrations/0003_add_smote_pipeline_to_feature_sets.sql` | Columnas de pipeline SMOTE |
-| `backend/migrations/0004_add_ip_useragent_to_system_logs.sql` | IP y user-agent en logs |
-| `backend/migrations/0005_add_dataset_timestamps.sql` | Timestamps en datasets |
-| `backend/migrations/0006_add_username_to_users.sql` | Agrega `username` y `updated_at` a usuarios |
-
-### Cómo aplicar una migración
-
-Desde PowerShell (sin soporte para `<` con ejecutables nativos, usa `-c`):
-
-```powershell
-# Ejemplo: migration 0006
-docker compose exec db psql -U protouser -d protodb -c "ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(100) UNIQUE; CREATE INDEX IF NOT EXISTS ix_users_username ON users (username); ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"
-```
-
-O usando pipe con `Get-Content`:
-
-```powershell
-Get-Content backend/migrations/0006_add_username_to_users.sql | docker compose exec -T db psql -U protouser -d protodb
-```
-
-Después de aplicar cualquier migración que afecte usuarios, ejecuta `init_db` para actualizar el admin:
-
-```powershell
-docker compose exec backend python -m backend.app.init_db
-docker compose restart backend
-```
+Los archivos en `backend/migrations/` se mantienen como referencia histórica. No necesitas ejecutarlos manualmente.
 
 ---
 

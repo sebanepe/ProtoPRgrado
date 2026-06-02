@@ -138,6 +138,88 @@ def ensure_transactions_merchant_rubro_column():
             conn.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_rubro_proxy VARCHAR(20) NULL"))
 
 
+def _add_column_if_missing(table: str, column: str, col_type_pg: str, col_type_sqlite: str | None = None):
+    """Add a single column to an existing table if it doesn't exist yet."""
+    try:
+        inspector = inspect(engine)
+        cols = {c["name"] for c in inspector.get_columns(table)}
+    except Exception:
+        return
+    if column in cols:
+        return
+    sqlite_type = col_type_sqlite or col_type_pg.replace(" WITH TIME ZONE", "")
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sqlite_type}"))
+        else:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type_pg}"))
+
+
+def ensure_migration_0002_dataset_id_on_transactions():
+    """Migration 0002: add dataset_id FK column to transactions."""
+    try:
+        inspector = inspect(engine)
+        cols = {c["name"] for c in inspector.get_columns("transactions")}
+    except Exception:
+        return
+    if "dataset_id" in cols:
+        return
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN dataset_id INTEGER"))
+        else:
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS dataset_id INTEGER"))
+            conn.execute(text(
+                "DO $$ BEGIN "
+                "  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_transactions_dataset_id') THEN "
+                "    ALTER TABLE transactions ADD CONSTRAINT fk_transactions_dataset_id "
+                "      FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE SET NULL; "
+                "  END IF; "
+                "END$$"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_dataset_id ON transactions(dataset_id)"))
+
+
+def ensure_migration_0003_smote_columns_on_feature_sets():
+    """Migration 0003: add smote_report_json and pipeline_path to feature_sets."""
+    _add_column_if_missing("feature_sets", "smote_report_json", "TEXT")
+    _add_column_if_missing("feature_sets", "pipeline_path", "VARCHAR(1024)")
+
+
+def ensure_migration_0004_ip_useragent_on_system_logs():
+    """Migration 0004: add ip and user_agent to system_logs."""
+    _add_column_if_missing("system_logs", "ip", "VARCHAR(64)")
+    _add_column_if_missing("system_logs", "user_agent", "VARCHAR(1024)")
+
+
+def ensure_migration_0005_timestamps_on_datasets():
+    """Migration 0005: add started_at, finished_at, error_message to datasets."""
+    _add_column_if_missing("datasets", "started_at", "TIMESTAMP WITH TIME ZONE")
+    _add_column_if_missing("datasets", "finished_at", "TIMESTAMP WITH TIME ZONE")
+    _add_column_if_missing("datasets", "error_message", "TEXT")
+
+
+def ensure_migration_0006_username_on_users():
+    """Migration 0006: add username and updated_at to users."""
+    try:
+        inspector = inspect(engine)
+        cols = {c["name"] for c in inspector.get_columns("users")}
+    except Exception:
+        return
+    with engine.begin() as conn:
+        if "username" not in cols:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR(100)"))
+            else:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(100) UNIQUE"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_username ON users (username)"))
+        if "updated_at" not in cols:
+            if engine.dialect.name == "sqlite":
+                conn.execute(text("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP"))
+            else:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE"))
+
+
 def ensure_user_role_column():
     """If the existing users table doesn't have role_id, add it (SQLite/dev friendly)."""
     conn = engine.connect()
@@ -278,6 +360,11 @@ def main():
         ensure_tables()
         ensure_traceability_tables()
         ensure_transactions_merchant_rubro_column()
+        ensure_migration_0002_dataset_id_on_transactions()
+        ensure_migration_0003_smote_columns_on_feature_sets()
+        ensure_migration_0004_ip_useragent_on_system_logs()
+        ensure_migration_0005_timestamps_on_datasets()
+        ensure_migration_0006_username_on_users()
     except OperationalError as oe:
         msg = f"Could not connect to the database: {oe}\nEnsure your DATABASE_URL is correct and the DB is reachable."
         print(msg)
