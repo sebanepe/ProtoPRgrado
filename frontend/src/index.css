@@ -617,6 +617,50 @@ button, input, select, textarea {
 	min-width: 980px;
 }
 
+.dashboard-page {
+	display: grid;
+	gap: 16px;
+}
+
+.dashboard-page .card,
+.dashboard-page .kpi-grid {
+	margin-bottom: 0;
+}
+
+.dashboard-header {
+	margin-bottom: 0;
+}
+
+.dashboard-kpis {
+	grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+}
+
+.phase-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+	gap: 14px;
+}
+
+.dashboard-models-table {
+	min-width: 860px;
+}
+
+.dashboard-scoring-table {
+	min-width: 980px;
+}
+
+.quick-actions {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.quick-actions .button {
+	min-height: 40px;
+	box-shadow: none;
+}
+
 @media (max-width: 900px) {
 	.dashboard-chart-grid {
 		grid-template-columns: 1fr;

@@ -1,100 +1,146 @@
 import React from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 vi.mock('../services/api')
+
 import Dashboard from '../pages/Dashboard'
 import * as api from '../services/api'
 
 const overview = {
   source_run: 'preprocessed_run_26',
-  anomaly_run: 'run_26',
   total_transactions: 548108,
   active_alerts: 12,
-  average_risk_score: 84.5,
-  active_model: {
-    model_name: 'Isolation Forest',
-    run_id: 'run_26',
-    anomaly_count: 5481,
-    anomaly_rate: 0.009999854
-  },
-  review_distribution: {
-    confirmed_fraud: 2,
-    dismissed: 3,
-    in_review: 0,
-    new: 0,
-    total_reviews: 5,
-    usable_total_labels: 5
-  },
-  alerts_evolution: [{date: '2026-04-14', count: 2, high: 1, medium: 1, low: 0}],
-  recent_alerts: [
-    {
-      alert_id: '26-S-001',
-      rule_code: 'RULE_A',
-      customer_hash: 'cust_a',
-      risk_score: 90,
-      risk_level: 'HIGH',
-      status: 'NEW',
-      created_at: '2026-05-30T20:19:34+00:00'
-    }
+  review_distribution: { new: 1, in_review: 2, dismissed: 3, confirmed_fraud: 2 },
+}
+
+const runs = [{ run_id: 'preprocessed_run_26', filename: 'preprocessed_run_26.csv', created_at: '2026-06-01T10:00:00Z' }]
+const grouped = { total_items: 25, items: [{ summary_alert_id: 'A1' }] }
+const detailed = { total_items: 80, items: [{ alert_id: 'D1' }] }
+const reviews = { total_items: 6, items: [] }
+const humanSummary = { total_reviews: 8, new: 1, in_review: 2, dismissed: 3, false_positive_excluded: 0, confirmed_fraud: 2 }
+const anomalyRuns = { runs: [{ algorithm: 'isolation_forest', source_run: 'preprocessed_run_26', anomaly_count: 5481, created_at: '2026-06-01T10:00:00Z' }] }
+const supervisedRuns = {
+  items: [
+    { algorithm: 'logistic_regression', source_run: 'preprocessed_run_26', status: 'AVAILABLE', created_at: '2026-06-01T10:00:00Z', metrics: { f1_score: 0.72 } },
+    { algorithm: 'random_forest', source_run: 'preprocessed_run_26', status: 'AVAILABLE', created_at: '2026-06-01T10:00:00Z', metrics: { f1_score: 0.8 } },
+    { algorithm: 'gradient_boosting', source_run: 'preprocessed_run_26', status: 'AVAILABLE', created_at: '2026-06-01T10:00:00Z', metrics: { f1_score: 0.68 } },
   ],
-  warnings: []
+}
+const evaluation = { metrics: { autoencoder: { anomaly_count: 10 }, supervised: {} } }
+const scoringRuns = {
+  count: 1,
+  items: [{ id: 7, source_run: 'preprocessed_run_26', algorithm: 'random_forest', total_scored: 100, high_count: 10, medium_count: 30, low_count: 60, status: 'COMPLETED', created_at: '2026-06-01T10:00:00Z' }],
+}
+const casesSummary = {
+  total: 4,
+  by_status: { OPEN: 2, IN_ANALYSIS: 1, ESCALATED: 0, CLOSED: 1 },
+  by_priority: { HIGH: 2, CRITICAL: 1 },
 }
 
-function renderDashboard(){
-  return render(
-    <MemoryRouter>
-      <Dashboard />
-    </MemoryRouter>
-  )
+function mockDashboardData(overrides = {}) {
+  api.getDashboardOverview.mockResolvedValue(overrides.overview ?? overview)
+  api.getPreprocessedRuns.mockResolvedValue(overrides.runs ?? runs)
+  api.getRulesSummary.mockResolvedValue(overrides.grouped ?? grouped)
+  api.getRulesAlerts.mockResolvedValue(overrides.detailed ?? detailed)
+  api.getAlertReviews.mockResolvedValue(overrides.reviews ?? reviews)
+  api.getHumanLabelSummary.mockResolvedValue(overrides.humanSummary ?? humanSummary)
+  api.getAnomalyRuns.mockResolvedValue(overrides.anomalyRuns ?? anomalyRuns)
+  api.getSupervisedTrainingRuns.mockResolvedValue(overrides.supervisedRuns ?? supervisedRuns)
+  api.getModelEvaluationSummary.mockResolvedValue(overrides.evaluation ?? evaluation)
+  api.getBatchScoringRuns.mockResolvedValue(overrides.scoringRuns ?? scoringRuns)
+  api.getCasesSummary.mockResolvedValue(overrides.casesSummary ?? casesSummary)
 }
 
-describe('Dashboard page', ()=>{
-  beforeEach(()=>{
+function renderDashboard() {
+  return render(<MemoryRouter><Dashboard /></MemoryRouter>)
+}
+
+describe('Dashboard General', () => {
+  beforeEach(() => {
     vi.clearAllMocks()
+    mockDashboardData()
   })
 
-  afterEach(()=>{
-    cleanup()
-  })
+  afterEach(() => cleanup())
 
-  it('renders real dashboard overview metrics', async ()=>{
-    api.getDashboardOverview.mockResolvedValue(overview)
+  it('renderiza titulo, mensaje metodologico y metricas principales', async () => {
     renderDashboard()
 
-    await waitFor(()=> expect(api.getDashboardOverview).toHaveBeenCalledWith({ source_run: 'preprocessed_run_26', anomaly_run: 'run_26' }))
-    expect(screen.getByText('Transacciones analizadas')).toBeTruthy()
+    await waitFor(() => expect(api.getDashboardOverview).toHaveBeenCalled())
+    expect(screen.getByText('Dashboard General')).toBeTruthy()
+    expect(screen.getByText(/señales de apoyo analítico/i)).toBeTruthy()
+    expect(screen.getByText('Transacciones procesadas')).toBeTruthy()
     expect(screen.getByText('548.108')).toBeTruthy()
-    expect(screen.getByText('Alertas activas')).toBeTruthy()
-    expect(screen.getByText('12')).toBeTruthy()
-    expect(screen.getByText('Modelo activo')).toBeTruthy()
-    expect(screen.getByText('Isolation Forest / run_26')).toBeTruthy()
-    expect(screen.getByText('Proporcion de revision')).toBeTruthy()
-    expect(screen.getByText('Alertas recientes')).toBeTruthy()
-    expect(screen.getByText('26-S-001')).toBeTruthy()
+    expect(screen.getByText('Alertas agrupadas')).toBeTruthy()
+    expect(screen.getByText('Alertas detalladas')).toBeTruthy()
+    expect(screen.getByText('Revisiones humanas')).toBeTruthy()
+    expect(screen.getByText('Modelos entrenados')).toBeTruthy()
   })
 
-  it('does not render the old fraud ratio wording or target label fields', async ()=>{
-    api.getDashboardOverview.mockResolvedValue({...overview, review_distribution: { total_reviews: 0 }})
-    const { container } = renderDashboard()
+  it('muestra estado por fases, modelos, scoring y casos', async () => {
+    renderDashboard()
 
-    await waitFor(()=> expect(screen.getByText('Sin revisiones humanas suficientes.')).toBeTruthy())
-    expect(screen.queryByText('Proporcion fraude')).toBeNull()
-    expect(container.textContent).not.toContain('is_fraud')
-    expect(container.textContent).not.toContain('confirmed_fraud')
+    expect(await screen.findByText('Estado por fases')).toBeTruthy()
+    expect(screen.getByText('Fase A: Data Pipeline')).toBeTruthy()
+    expect(screen.getByText('Fase B: Reglas y Alertas')).toBeTruthy()
+    expect(screen.getByText('Fase C: Modelos')).toBeTruthy()
+    expect(screen.getByText('Fase D: Monitoreo')).toBeTruthy()
+    expect(screen.getByText('Estado de modelos')).toBeTruthy()
+    expect(screen.getByText('Isolation Forest')).toBeTruthy()
+    expect(screen.getByText('Autoencoder PyTorch')).toBeTruthy()
+    expect(screen.getByText('Últimos scorings')).toBeTruthy()
+    expect(screen.getByText('random_forest')).toBeTruthy()
+    expect(screen.getByText('Resumen de casos')).toBeTruthy()
+    expect(screen.getByText('Casos por estado')).toBeTruthy()
   })
 
-  it('shows controlled empty states', async ()=>{
-    api.getDashboardOverview.mockResolvedValue({
-      ...overview,
-      alerts_evolution: [],
-      recent_alerts: [],
-      review_distribution: { total_reviews: 0 }
+  it('muestra graficos y accesos rapidos', async () => {
+    renderDashboard()
+
+    expect(await screen.findByText('Distribución de revisión humana')).toBeTruthy()
+    expect(screen.getByText('Scoring por nivel de prioridad')).toBeTruthy()
+    expect(screen.getByText('Ver alertas')).toBeTruthy()
+    expect(screen.getByText('Ejecutar scoring')).toBeTruthy()
+    expect(screen.getByText('Ver casos')).toBeTruthy()
+  })
+
+  it('maneja datos vacios sin romper la pantalla', async () => {
+    mockDashboardData({
+      overview: {},
+      runs: [],
+      grouped: { total_items: 0, items: [] },
+      detailed: { total_items: 0, items: [] },
+      reviews: { total_items: 0, items: [] },
+      humanSummary: {},
+      anomalyRuns: { runs: [] },
+      supervisedRuns: { items: [] },
+      evaluation: {},
+      scoringRuns: { count: 0, items: [] },
+      casesSummary: { total: 0, by_status: {}, by_priority: {} },
     })
     renderDashboard()
 
-    await waitFor(()=> expect(screen.getByText('No existen alertas para graficar.')).toBeTruthy())
-    expect(screen.getByText('No hay alertas recientes.')).toBeTruthy()
-    expect(screen.getByText('Sin revisiones humanas suficientes.')).toBeTruthy()
+    expect(await screen.findByText('Dashboard General')).toBeTruthy()
+    expect(screen.getAllByText('Sin datos').length).toBeGreaterThan(0)
+    expect(screen.getByText('Sin datos de scoring.')).toBeTruthy()
+    expect(screen.getAllByText('No hay datos suficientes para este gráfico.').length).toBeGreaterThan(0)
+  })
+
+  it('muestra warning cuando hay error parcial', async () => {
+    api.getRulesSummary.mockRejectedValue(new Error('Network Error'))
+    renderDashboard()
+
+    expect(await screen.findByText('Algunas métricas no pudieron cargarse.')).toBeTruthy()
+    expect(screen.getByText('Dashboard General')).toBeTruthy()
+  })
+
+  it('no muestra campos prohibidos en minusculas', async () => {
+    const { container } = renderDashboard()
+    await screen.findByText('Dashboard General')
+
+    expect(container.textContent).not.toContain('is_fraud')
+    expect(container.textContent).not.toContain('confirmed_fraud')
   })
 })

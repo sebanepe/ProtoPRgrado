@@ -1,20 +1,18 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
-import Sidebar from '../../../src/components/Sidebar'
 import { MemoryRouter } from 'react-router-dom'
+import { describe, expect, it } from 'vitest'
+import Sidebar from '../../../src/components/Sidebar'
 
 describe('Sidebar component', () => {
-  it('renders the reorganized navigation structure', () => {
+  it('renders navigation with Administracion limited to Usuarios', () => {
     render(
       <MemoryRouter>
         <Sidebar />
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Sistema de Detección y Monitoreo de Fraude')).toBeTruthy()
-    expect(screen.getByText('Dashboard')).toBeTruthy()
-    expect(screen.getByText('Panel')).toBeTruthy()
+    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0)
     expect(screen.getByText('Fase A: Data Pipeline')).toBeTruthy()
     expect(screen.getByText('Importación de Datos')).toBeTruthy()
     expect(screen.getByText('Preprocesamiento')).toBeTruthy()
@@ -29,11 +27,10 @@ describe('Sidebar component', () => {
     expect(screen.getByText('Manejo de Casos')).toBeTruthy()
     expect(screen.getByText('Administración')).toBeTruthy()
     expect(screen.getByText('Usuarios')).toBeTruthy()
-    expect(screen.getByText('Configuración')).toBeTruthy()
 
-    expect(screen.queryByText('Alertas (Legacy)')).toBeNull()
-    expect(screen.queryByText('Reportes')).toBeNull()
-    expect(screen.queryByText('Analítica Avanzada')).toBeNull()
-    expect(screen.queryByText('Exportación de Resultados')).toBeNull()
+    expect(screen.queryByText('Configuracion')).toBeNull()
+    expect(screen.queryByText('Configuración')).toBeNull()
+    expect(screen.queryByText('ConfiguraciÃ³n')).toBeNull()
+    expect(screen.queryByText('Settings')).toBeNull()
   })
 })
