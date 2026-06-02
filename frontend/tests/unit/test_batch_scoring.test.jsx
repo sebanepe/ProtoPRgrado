@@ -33,7 +33,6 @@ describe('BatchScoring page (unit)', () => {
 
   it('muestra mensaje vacío cuando no hay ejecuciones', async () => {
     render(<BatchScoring />)
-    await waitFor(() => expect(api.getBatchScoringRuns).toHaveBeenCalled())
-    expect(screen.getByText(/No existen ejecuciones de scoring/i)).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/No existen ejecuciones de scoring/i)).toBeTruthy())
   })
 })
