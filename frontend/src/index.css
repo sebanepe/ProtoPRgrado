@@ -1405,7 +1405,7 @@ pre {
 }
 
 .consensus-row td {
-  background: rgba(247, 185, 85, 0.04);
+  background: transparent;
 }
 
 .consensus-badge {
@@ -1419,4 +1419,98 @@ pre {
   padding: 2px 8px;
   min-width: 32px;
   text-align: center;
+}
+
+/* ── Risk distribution bar ──────────────────────────────────────────── */
+.risk-distribution-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.risk-dist-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  padding: 8px 14px;
+  min-width: 90px;
+  opacity: 0.9;
+}
+
+.risk-dist-count {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.risk-dist-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Group header rows ───────────────────────────────────────────────── */
+.consensus-group-header td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.mcc-group-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-right: 10px;
+}
+
+.mcc-group-count {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ── MCC cell inside rows ────────────────────────────────────────────── */
+.mcc-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mcc-badge-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px solid;
+  width: fit-content;
+  letter-spacing: 0.03em;
+}
+
+.mcc-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Utility cell classes ────────────────────────────────────────────── */
+.mono-sm {
+  font-family: monospace;
+  font-size: 0.78rem;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amount-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
 }

@@ -32,6 +32,70 @@ from backend.app.ml.unsupervised_feature_builder import (
 
 ARTIFACT_UNSUPERVISED_INFERENCE_SCORES = "UNSUPERVISED_INFERENCE_SCORES"
 
+# MCC lookup: code → (description, risk_group)
+# risk_group: CASH_ATM | GAMBLING | HIGH_RISK | DIGITAL | TRAVEL | RETAIL | UNKNOWN
+_MCC_LOOKUP: Dict[str, tuple] = {
+    # Cash / ATM / Financial
+    "6010": ("Cash Advance - banco", "CASH_ATM"),
+    "6011": ("ATM / Cash Advance", "CASH_ATM"),
+    "6012": ("Institución financiera", "CASH_ATM"),
+    "6051": ("Quasi-Cash / Cripto", "CASH_ATM"),
+    "6211": ("Corredora de valores", "CASH_ATM"),
+    "6540": ("POSt billeteras prepago", "CASH_ATM"),
+    # Gambling
+    "7995": ("Apuestas / Casinos", "GAMBLING"),
+    "9406": ("Lotería / Juegos azar", "GAMBLING"),
+    "7801": ("Casinos gubernamentales", "GAMBLING"),
+    "7802": ("Hipódromo / Carreras", "GAMBLING"),
+    # High risk
+    "5094": ("Joyería mayorista", "HIGH_RISK"),
+    "5944": ("Joyerías", "HIGH_RISK"),
+    "5813": ("Bares / Alcohol", "HIGH_RISK"),
+    "5933": ("Casas de empeño", "HIGH_RISK"),
+    "5912": ("Farmacias", "HIGH_RISK"),
+    # Digital / E-commerce
+    "7311": ("Publicidad digital", "DIGITAL"),
+    "7372": ("Software / SaaS", "DIGITAL"),
+    "4816": ("Internet / Servicios online", "DIGITAL"),
+    "5818": ("Tiendas digitales", "DIGITAL"),
+    "5817": ("Apps móviles", "DIGITAL"),
+    "5816": ("Videojuegos / Gaming", "DIGITAL"),
+    "5815": ("Medios digitales", "DIGITAL"),
+    "5045": ("Computadoras / TI", "DIGITAL"),
+    # Travel
+    "4722": ("Agencia de viajes", "TRAVEL"),
+    "4511": ("Aerolíneas", "TRAVEL"),
+    "7011": ("Hoteles / Alojamiento", "TRAVEL"),
+    "4121": ("Taxi / Ride-share", "TRAVEL"),
+    "7513": ("Alquiler de autos", "TRAVEL"),
+    "5812": ("Restaurantes / Comida", "TRAVEL"),
+    "5814": ("Fast food", "TRAVEL"),
+    # Retail / Regular commerce
+    "5411": ("Supermercados", "RETAIL"),
+    "5541": ("Gasolineras", "RETAIL"),
+    "5499": ("Minimarkets / Almacenes", "RETAIL"),
+    "5651": ("Ropa familiar", "RETAIL"),
+    "5732": ("Electrónica / Tecnología", "RETAIL"),
+    "5977": ("Cosméticos / Belleza", "RETAIL"),
+    "5462": ("Panaderías", "RETAIL"),
+    "5942": ("Librerías", "RETAIL"),
+    "5734": ("Computadoras retail", "RETAIL"),
+    "5999": ("Otros comercios", "RETAIL"),
+    "4899": ("Cable / Streaming", "RETAIL"),
+    "4814": ("Telefonía", "RETAIL"),
+    "8220": ("Universidades / Educación", "RETAIL"),
+    "5399": ("Grandes superficies", "RETAIL"),
+}
+
+
+def _mcc_info(code: str) -> Dict[str, str]:
+    """Return description and risk_group for a MCC code string."""
+    if not code or str(code).upper() in {"UNKNOWN", "NAN", "NONE", ""}:
+        return {"mcc_description": "Sin categoría", "mcc_risk_group": "UNKNOWN"}
+    normalized = str(code).strip().split(".")[0]  # remove trailing .0
+    desc, group = _MCC_LOOKUP.get(normalized, (f"MCC {normalized}", "RETAIL"))
+    return {"mcc_description": desc, "mcc_risk_group": group}
+
 FORBIDDEN_OUTPUT_COLUMNS = {
     "is_fraud",
     "confirmed_fraud",
@@ -759,11 +823,22 @@ def compare_inference_runs(db: Session, run_id_a: int, run_id_b: int) -> Dict[st
     merged = merged.reset_index(drop=True)
     merged["consensus_priority"] = merged.index + 1
 
-    rows = (
+    raw_rows = (
         merged
         .replace({float("nan"): None, float("inf"): None, float("-inf"): None})
         .to_dict(orient="records")
     )
+
+    # Enrich each row with MCC description and risk group
+    rows = []
+    for r in raw_rows:
+        mcc_code = str(r.get("merchant_rubro_proxy") or "UNKNOWN")
+        r.update(_mcc_info(mcc_code))
+        rows.append(r)
+
+    # Summary counts per risk group (for the UI distribution bar)
+    from collections import Counter
+    risk_group_summary = dict(Counter(r["mcc_risk_group"] for r in rows))
 
     return {
         "run_a": {
@@ -784,5 +859,6 @@ def compare_inference_runs(db: Session, run_id_a: int, run_id_b: int) -> Dict[st
         "only_in_b": len(set_b - set_a),
         "agreement_rate_pct": round(len(intersection) / max(len(set_a), len(set_b), 1) * 100, 1),
         "rows": rows[:500],
+        "risk_group_summary": risk_group_summary,
         "methodology_warning": METHODOLOGY_WARNING,
     }

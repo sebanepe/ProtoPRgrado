@@ -1701,48 +1701,95 @@ export default function Models() {
 
                   <div className="status-banner" style={{ background: 'rgba(247,185,85,0.1)', borderColor: 'rgba(247,185,85,0.3)', color: '#ffe082', marginTop: '12px' }}>
                     Las <strong>{consensusData.intersection_count?.toLocaleString('es-ES')} transacciones</strong> de abajo fueron marcadas simultáneamente por <strong>{consensusData.run_a.algorithm}</strong> y <strong>{consensusData.run_b.algorithm}</strong>.
-                    Dos algoritmos independientes (uno basado en redes neuronales, otro en árboles de decisión) coinciden en señalarlas como atípicas.
-                    Priorice su revisión manual. {consensusData.methodology_warning}
+                    Dos algoritmos independientes coinciden en señalarlas. Están agrupadas por categoría de riesgo del comercio (MCC). {consensusData.methodology_warning}
                   </div>
 
-                  {consensusData.rows?.length > 0 ? (
-                    <div className="table-scroll" style={{ marginTop: '16px' }}>
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th title="Ordenado por suma de ranking en ambos modelos">Prioridad consenso</th>
-                            <th>ID Transacción</th>
-                            <th>Cliente</th>
-                            <th>Fecha</th>
-                            <th>Monto</th>
-                            <th>País</th>
-                            <th title={`Ranking en ${consensusData.run_a.algorithm}`}>Rank {consensusData.run_a.algorithm}</th>
-                            <th title={`Score de anomalía en ${consensusData.run_a.algorithm}`}>Score {consensusData.run_a.algorithm}</th>
-                            <th title={`Ranking en ${consensusData.run_b.algorithm}`}>Rank {consensusData.run_b.algorithm}</th>
-                            <th title={`Score de anomalía en ${consensusData.run_b.algorithm}`}>Score {consensusData.run_b.algorithm}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {consensusData.rows.map((row, idx) => (
-                            <tr key={row.transaction_id || idx} className="consensus-row">
-                              <td><span className="consensus-badge">{row.consensus_priority}</span></td>
-                              <td>{row.transaction_id || 'N/A'}</td>
-                              <td>{row.customer_hash || 'N/A'}</td>
-                              <td>{row.transaction_datetime ? new Date(row.transaction_datetime).toLocaleDateString('es-ES') : 'N/A'}</td>
-                              <td>{row.amount != null ? Number(row.amount).toLocaleString('es-ES', { minimumFractionDigits: 2 }) : 'N/A'}</td>
-                              <td>{row.country_code || 'N/A'}</td>
-                              <td>{row[`rank_${consensusData.run_a.algorithm}`] ?? 'N/A'}</td>
-                              <td>{row[`score_${consensusData.run_a.algorithm}`] != null ? Number(row[`score_${consensusData.run_a.algorithm}`]).toFixed(4) : 'N/A'}</td>
-                              <td>{row[`rank_${consensusData.run_b.algorithm}`] ?? 'N/A'}</td>
-                              <td>{row[`score_${consensusData.run_b.algorithm}`] != null ? Number(row[`score_${consensusData.run_b.algorithm}`]).toFixed(4) : 'N/A'}</td>
-                            </tr>
+                  {(() => {
+                    const RISK_ORDER = ['CASH_ATM', 'GAMBLING', 'HIGH_RISK', 'DIGITAL', 'TRAVEL', 'RETAIL', 'UNKNOWN']
+                    const RISK_CONFIG = {
+                      CASH_ATM:  { label: 'Efectivo / ATM / Financiero',  color: '#ff4757', bg: 'rgba(255,71,87,0.10)'   },
+                      GAMBLING:  { label: 'Apuestas / Juegos de azar',    color: '#ff6b35', bg: 'rgba(255,107,53,0.10)'  },
+                      HIGH_RISK: { label: 'Alto riesgo',                  color: '#f7b955', bg: 'rgba(247,185,85,0.10)'  },
+                      DIGITAL:   { label: 'Digital / E-commerce',         color: '#7c83fd', bg: 'rgba(124,131,253,0.10)' },
+                      TRAVEL:    { label: 'Viajes / Transporte',          color: '#2ed573', bg: 'rgba(46,213,115,0.08)'  },
+                      RETAIL:    { label: 'Comercio regular',             color: '#747d8c', bg: 'rgba(116,125,140,0.08)' },
+                      UNKNOWN:   { label: 'Sin categoría MCC',            color: '#57606f', bg: 'rgba(87,96,111,0.06)'   },
+                    }
+                    const grouped = {}
+                    RISK_ORDER.forEach(g => { grouped[g] = [] })
+                    ;(consensusData.rows || []).forEach(row => {
+                      const g = row.mcc_risk_group || 'UNKNOWN'
+                      ;(grouped[g] || grouped['UNKNOWN']).push(row)
+                    })
+                    const activeGroups = RISK_ORDER.filter(g => grouped[g].length > 0)
+                    if (activeGroups.length === 0) return <div className="empty-state">No hay transacciones en común entre los dos modelos.</div>
+
+                    return (
+                      <>
+                        {/* Risk distribution summary bar */}
+                        <div className="risk-distribution-bar">
+                          {activeGroups.map(g => (
+                            <div key={g} className="risk-dist-item" style={{ borderColor: RISK_CONFIG[g].color }}>
+                              <span className="risk-dist-count" style={{ color: RISK_CONFIG[g].color }}>{grouped[g].length}</span>
+                              <span className="risk-dist-label">{RISK_CONFIG[g].label}</span>
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="empty-state">No hay transacciones en común entre los dos modelos.</div>
-                  )}
+                        </div>
+
+                        <div className="table-scroll" style={{ marginTop: '16px' }}>
+                          <table className="table">
+                            <thead>
+                              <tr>
+                                <th title="Ordenado por suma de ranking en ambos modelos">Prioridad</th>
+                                <th>Categoría MCC</th>
+                                <th>ID Transacción</th>
+                                <th>Cliente</th>
+                                <th>Fecha</th>
+                                <th>Monto</th>
+                                <th>País</th>
+                                <th title={`Ranking en ${consensusData.run_a.algorithm}`}>Rank {consensusData.run_a.algorithm.replace('_', ' ')}</th>
+                                <th title={`Ranking en ${consensusData.run_b.algorithm}`}>Rank {consensusData.run_b.algorithm.replace('_', ' ')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {activeGroups.map(group => (
+                                <>
+                                  <tr key={`group-${group}`} className="consensus-group-header" style={{ background: RISK_CONFIG[group].bg }}>
+                                    <td colSpan={9}>
+                                      <span className="mcc-group-badge" style={{ color: RISK_CONFIG[group].color }}>
+                                        {RISK_CONFIG[group].label}
+                                      </span>
+                                      <span className="mcc-group-count">{grouped[group].length} transacciones</span>
+                                    </td>
+                                  </tr>
+                                  {grouped[group].map((row, idx) => (
+                                    <tr key={row.transaction_id || `${group}-${idx}`} className="consensus-row">
+                                      <td><span className="consensus-badge">{row.consensus_priority}</span></td>
+                                      <td>
+                                        <div className="mcc-cell">
+                                          <span className="mcc-badge-pill" style={{ background: RISK_CONFIG[group].bg, color: RISK_CONFIG[group].color, borderColor: RISK_CONFIG[group].color }}>
+                                            {row.merchant_rubro_proxy || '—'}
+                                          </span>
+                                          <span className="mcc-desc">{row.mcc_description || ''}</span>
+                                        </div>
+                                      </td>
+                                      <td className="mono-sm">{row.transaction_id || 'N/A'}</td>
+                                      <td className="mono-sm">{row.customer_hash || 'N/A'}</td>
+                                      <td>{row.transaction_datetime ? new Date(row.transaction_datetime).toLocaleDateString('es-ES') : 'N/A'}</td>
+                                      <td className="amount-cell">{row.amount != null ? Number(row.amount).toLocaleString('es-ES', { minimumFractionDigits: 2 }) : 'N/A'}</td>
+                                      <td>{row.country_code || 'N/A'}</td>
+                                      <td>{row[`rank_${consensusData.run_a.algorithm}`] ?? 'N/A'}</td>
+                                      <td>{row[`rank_${consensusData.run_b.algorithm}`] ?? 'N/A'}</td>
+                                    </tr>
+                                  ))}
+                                </>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </>
               )}
             </div>
