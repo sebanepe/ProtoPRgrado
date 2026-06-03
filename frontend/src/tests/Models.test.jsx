@@ -234,6 +234,66 @@ const autoencoderMetadata = {
   },
 }
 
+const trainedModels = [
+  {
+    id: 1,
+    algorithm: 'isolation_forest',
+    source_run: 'preprocessed_run_26',
+    status: 'AVAILABLE',
+    is_active: false,
+    created_at: '2026-05-30T00:00:00Z',
+    anomaly_rate: 0.01,
+    contamination: 0.01,
+    total_records: 548108,
+  },
+  {
+    id: 2,
+    algorithm: 'autoencoder_pytorch',
+    source_run: 'preprocessed_run_26',
+    status: 'AVAILABLE',
+    is_active: true,
+    created_at: '2026-05-31T00:00:00Z',
+    anomaly_rate: 0.01,
+    contamination: 0.01,
+    total_records: 548108,
+  },
+]
+
+const preprocessedRuns = [
+  { id: 26, output_file_path: '/data/processed/preprocessed_run_26.csv', total_records: 548108, finished_at: '2026-05-29T00:00:00Z', status: 'COMPLETED' },
+]
+
+const predictionRunsList = [
+  { id: 1, algorithm: 'isolation_forest', model_source_run: 'preprocessed_run_26', input_type: 'preprocessed_run', input_source: 'preprocessed_run_26', total_analyzed: 100, anomaly_count: 2, anomaly_rate: 0.02, status: 'COMPLETED', created_at: '2026-06-01T00:00:00Z' },
+]
+
+const predResultsPayload = {
+  run_id: 1,
+  status: 'COMPLETED',
+  total: 2,
+  page: 1,
+  page_size: 50,
+  rows: [
+    { transaction_id: 'tx1', customer_hash: 'cust1', anomaly_score: 0.9, anomaly_flag: 1, anomaly_rank: 1 },
+    { transaction_id: 'tx2', customer_hash: 'cust2', anomaly_score: 0.1, anomaly_flag: 0, anomaly_rank: 2 },
+  ],
+  methodology_warning: 'Las anomalías detectadas por modelos no supervisados representan comportamientos atípicos y no constituyen fraude confirmado.',
+}
+
+const predReportPayload = {
+  run_id: 1,
+  algorithm: 'isolation_forest',
+  model_source_run: 'preprocessed_run_26',
+  input_type: 'preprocessed_run',
+  input_source: 'preprocessed_run_26',
+  total_analyzed: 100,
+  anomaly_count: 2,
+  anomaly_rate: 0.02,
+  status: 'COMPLETED',
+  score_distribution: [{ bucket: '0.0–0.5', count: 90 }, { bucket: '0.5–1.0', count: 10 }],
+  methodology_warning: 'Las anomalías detectadas por modelos no supervisados representan comportamientos atípicos y no constituyen fraude confirmado.',
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.setItem('user', JSON.stringify({ id: 1, email: 'user@example.com', token: 'token' }))
@@ -256,6 +316,13 @@ beforeEach(() => {
   api.getAutoencoderReport.mockResolvedValue(autoencoderReport)
   api.getAutoencoderModelMetadata.mockResolvedValue(autoencoderMetadata)
   api.trainAutoencoderAnomaly.mockResolvedValue({ status: 'COMPLETED', algorithm: 'autoencoder_pytorch', source_run: 'preprocessed_run_26' })
+  // Apply tab mocks
+  api.getUnsupervisedTrainedModels.mockResolvedValue(trainedModels)
+  api.getUnsupervisedPreprocessedRuns.mockResolvedValue(preprocessedRuns)
+  api.applyUnsupervisedModel.mockResolvedValue({ id: 1, status: 'COMPLETED', total_analyzed: 100, anomaly_count: 2, anomaly_rate: 0.02, algorithm: 'isolation_forest', model_source_run: 'preprocessed_run_26', methodology_warning: 'Las anomalías...' })
+  api.getUnsupervisedPredictionRuns.mockResolvedValue(predictionRunsList)
+  api.getUnsupervisedPredictionResults.mockResolvedValue(predResultsPayload)
+  api.getUnsupervisedPredictionReport.mockResolvedValue(predReportPayload)
 })
 
 afterEach(() => {
@@ -428,5 +495,111 @@ describe('Models route and sidebar', () => {
 
     await waitFor(() => expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0))
     await waitFor(() => expect(screen.getAllByText('No Supervisados').length).toBeGreaterThan(0))
+  })
+})
+
+describe('Models page — Aplicar modelo entrenado tab', () => {
+  it('renders both tabs in the UI', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    expect(screen.getByRole('button', { name: 'Entrenamiento / Resultados actuales' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Aplicar modelo entrenado' })).toBeTruthy()
+  })
+
+  it('clicking "Aplicar modelo entrenado" tab shows apply section', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(api.getUnsupervisedTrainedModels).toHaveBeenCalled())
+    await waitFor(() => expect(api.getUnsupervisedPreprocessedRuns).toHaveBeenCalled())
+    await waitFor(() => expect(api.getUnsupervisedPredictionRuns).toHaveBeenCalled())
+  })
+
+  it('apply tab shows methodology warning about no confirmed fraud', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(screen.getByText(/Advertencia metodológica/i)).toBeTruthy())
+    expect(screen.getByText(/no constituyen fraude confirmado/i)).toBeTruthy()
+  })
+
+  it('apply tab lists trained models from API', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(api.getUnsupervisedTrainedModels).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getAllByText('isolation_forest').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('autoencoder_pytorch').length).toBeGreaterThan(0))
+  })
+
+  it('apply tab "Aplicar modelo" button is disabled when no model selected', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aplicar modelo' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Aplicar modelo' }).disabled).toBe(true)
+  })
+
+  it('apply tab shows prediction runs and results after loading', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(api.getUnsupervisedPredictionRuns).toHaveBeenCalled())
+    await waitFor(() => expect(api.getUnsupervisedPredictionResults).toHaveBeenCalled())
+    await waitFor(() => expect(api.getUnsupervisedPredictionReport).toHaveBeenCalled())
+  })
+
+  it('apply tab results do not show is_fraud or confirmed_fraud', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => expect(api.getUnsupervisedTrainedModels).toHaveBeenCalled())
+
+    expect(screen.queryByText('is_fraud')).toBeNull()
+    expect(screen.queryByText('confirmed_fraud')).toBeNull()
+    expect(screen.queryByText('PAN_TARJETA')).toBeNull()
+  })
+
+  it('switching back to training tab hides apply section', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+    await waitFor(() => expect(screen.getByText(/Advertencia metodológica/i)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Entrenamiento / Resultados actuales' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Advertencia metodológica/i)).toBeNull()
+    })
+    expect(screen.getByText('Entrenar modelo no supervisado')).toBeTruthy()
+  })
+
+  it('apply tab shows KPI cards with prediction report data', async () => {
+    render(<Models />)
+    await waitFor(() => expect(api.getAnomalyRuns).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar modelo entrenado' }))
+
+    await waitFor(() => {
+      expect(api.getUnsupervisedPredictionReport).toHaveBeenCalled()
+      expect(screen.getByText('Registros analizados')).toBeTruthy()
+    })
+    expect(screen.getByText('Anomalías detectadas')).toBeTruthy()
+    expect(screen.getByText('Porcentaje de anomalías')).toBeTruthy()
+    expect(screen.getByText('Modelo aplicado')).toBeTruthy()
   })
 })

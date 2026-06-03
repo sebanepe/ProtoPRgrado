@@ -555,3 +555,29 @@ class CaseManagementHistory(Base):
     new_value  = Column(String(500), nullable=True)
     changed_by = Column(String(255), nullable=True)
     changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Fase C: Unsupervised Inference (apply trained model to new data) ─────────
+
+class UnsupervisedInferenceRun(Base):
+    __tablename__ = "unsupervised_inference_runs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    model_registry_id = Column(Integer, nullable=True)
+    algorithm         = Column(String(255), nullable=False, index=True)
+    model_source_run  = Column(String(255), nullable=False)
+    input_type        = Column(String(50), nullable=False)       # "csv_upload" | "preprocessed_run"
+    input_source      = Column(String(255), nullable=True)       # run name or CSV filename
+    input_file        = Column(String(1024), nullable=True)
+    results_file      = Column(String(1024), nullable=True)
+    metadata_file     = Column(String(1024), nullable=True)
+    total_analyzed    = Column(Integer, nullable=False, default=0)
+    anomaly_count     = Column(Integer, nullable=False, default=0)
+    anomaly_rate      = Column(Float, nullable=True)
+    status            = Column(String(50), nullable=False, default="PENDING", index=True)
+    error_message     = Column(Text, nullable=True)
+    params_json       = Column(Text, nullable=True)
+    started_at        = Column(DateTime(timezone=True), nullable=True)
+    finished_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())

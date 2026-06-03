@@ -366,6 +366,48 @@ export async function getAutoencoderModelMetadata(sourceRun){
 }
 
 // ============================================================
+// Phase C: Apply trained unsupervised model to new datasets
+// ============================================================
+
+export async function getUnsupervisedTrainedModels() {
+  return api.get('/api/unsupervised/trained-models').then(r => r.data)
+}
+
+export async function getUnsupervisedPreprocessedRuns() {
+  return api.get('/api/unsupervised/preprocessed-runs').then(r => r.data)
+}
+
+export async function applyUnsupervisedModel(formData) {
+  return api.post('/api/unsupervised/apply-trained-model', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data)
+}
+
+export async function getUnsupervisedPredictionRuns() {
+  return api.get('/api/unsupervised/prediction-runs').then(r => r.data)
+}
+
+export async function getUnsupervisedPredictionResults(runId, params = {}) {
+  return api.get('/api/unsupervised/prediction-results', { params: { run_id: runId, ...params } }).then(r => r.data)
+}
+
+export async function getUnsupervisedPredictionReport(runId) {
+  return api.get('/api/unsupervised/prediction-report', { params: { run_id: runId } }).then(r => r.data)
+}
+
+export async function getUnsupervisedPredictionMetadata(runId) {
+  return api.get('/api/unsupervised/prediction-metadata', { params: { run_id: runId } }).then(r => r.data)
+}
+
+export async function getUnsupervisedInferenceStatus(runId) {
+  return api.get(`/api/unsupervised/inference-status/${runId}`).then(r => r.data)
+}
+
+export async function compareUnsupervisedRuns(runIdA, runIdB) {
+  return api.get('/api/unsupervised/compare-runs', { params: { run_id_a: runIdA, run_id_b: runIdB } }).then(r => r.data)
+}
+
+// ============================================================
 // Phase C5.2: Model Evaluation Comparison API Functions
 // ============================================================
 export async function buildModelEvaluationComparison(payload){

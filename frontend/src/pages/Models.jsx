@@ -14,6 +14,14 @@ import {
   getTopAnomalies,
   trainAutoencoderAnomaly,
   trainAnomalyModel,
+  getUnsupervisedTrainedModels,
+  getUnsupervisedPreprocessedRuns,
+  applyUnsupervisedModel,
+  getUnsupervisedPredictionRuns,
+  getUnsupervisedPredictionResults,
+  getUnsupervisedPredictionReport,
+  getUnsupervisedInferenceStatus,
+  compareUnsupervisedRuns,
 } from '../services/api'
 
 const DEFAULT_TRAINING_FORM = {
@@ -267,6 +275,51 @@ export default function Models() {
   const [selectedAnomaly, setSelectedAnomaly] = useState(null)
   const [copyState, setCopyState] = useState('')
 
+  // ── Tab navigation ──────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState('training')
+
+  // ── Apply model tab state ───────────────────────────────────
+  const [trainedModels, setTrainedModels] = useState([])
+  const [trainedModelsLoading, setTrainedModelsLoading] = useState(false)
+  const [trainedModelsError, setTrainedModelsError] = useState('')
+  const [preprocessedRuns, setPreprocessedRuns] = useState([])
+  const [preprocessedRunsLoading, setPreprocessedRunsLoading] = useState(false)
+  const [selectedModelId, setSelectedModelId] = useState('')
+  const [applyInputType, setApplyInputType] = useState('preprocessed_run')
+  const [applyCsvFile, setApplyCsvFile] = useState(null)
+  const [applyPreprocessedRunId, setApplyPreprocessedRunId] = useState('')
+  const [applyLoading, setApplyLoading] = useState(false)
+  const [applyError, setApplyError] = useState('')
+  const [applySuccess, setApplySuccess] = useState('')
+  const [predictionRuns, setPredictionRuns] = useState([])
+  const [predRunsLoading, setPredRunsLoading] = useState(false)
+  const [selectedPredRunId, setSelectedPredRunId] = useState('')
+  const [predResults, setPredResults] = useState({ rows: [], total: 0 })
+  const [predResultsLoading, setPredResultsLoading] = useState(false)
+  const [predResultsError, setPredResultsError] = useState('')
+  const [predPage, setPredPage] = useState(1)
+  const [predPageSize, setPredPageSize] = useState(50)
+  const [predAnomalyOnly, setPredAnomalyOnly] = useState(false)
+  const [predReport, setPredReport] = useState(null)
+  const [applyPollRunId, setApplyPollRunId] = useState(null)
+  const [applyRunStatus, setApplyRunStatus] = useState('')
+  const [consensusRunIdA, setConsensusRunIdA] = useState('')
+  const [consensusRunIdB, setConsensusRunIdB] = useState('')
+  const [consensusData, setConsensusData] = useState(null)
+  const [consensusLoading, setConsensusLoading] = useState(false)
+  const [consensusError, setConsensusError] = useState('')
+
+  // Group completed inference runs by dataset to detect comparable pairs
+  const completedRunsByDataset = useMemo(() => {
+    const groups = {}
+    predictionRuns.filter(r => r.status === 'COMPLETED').forEach(r => {
+      const key = r.input_source || 'unknown'
+      if (!groups[key]) groups[key] = []
+      groups[key].push(r)
+    })
+    return Object.entries(groups).filter(([, runs]) => runs.length >= 2)
+  }, [predictionRuns])
+
   const selectedRun = useMemo(() => runs.find((run) => run.anomaly_run_id === selectedRunId) || null, [runs, selectedRunId])
   const selectedSourceRun = trainingForm.source_run.trim() || selectedRun?.source_run || 'preprocessed_run_26'
   const isAutoencoder = selectedAlgorithm === 'autoencoder_pytorch'
@@ -412,6 +465,174 @@ export default function Models() {
     if (!lookupRun) return
     loadScores(lookupRun, page, pageSize, normalizedScoreFilters, selectedAlgorithm)
   }, [selectedRunId, selectedAlgorithm, selectedSourceRun, page, pageSize, normalizedScoreFilters])
+
+  // ── Apply tab loaders ────────────────────────────────────────
+  async function loadTrainedModels() {
+    setTrainedModelsLoading(true)
+    setTrainedModelsError('')
+    try {
+      const data = await getUnsupervisedTrainedModels()
+      setTrainedModels(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setTrainedModelsError(extractErrorMessage(err, 'No se pudieron cargar los modelos entrenados.'))
+    } finally {
+      setTrainedModelsLoading(false)
+    }
+  }
+
+  async function loadPreprocessedRuns() {
+    setPreprocessedRunsLoading(true)
+    try {
+      const data = await getUnsupervisedPreprocessedRuns()
+      setPreprocessedRuns(Array.isArray(data) ? data : [])
+    } catch (_err) {
+      setPreprocessedRuns([])
+    } finally {
+      setPreprocessedRunsLoading(false)
+    }
+  }
+
+  async function loadPredictionRuns() {
+    setPredRunsLoading(true)
+    try {
+      const data = await getUnsupervisedPredictionRuns()
+      const runs = Array.isArray(data) ? data : []
+      setPredictionRuns(runs)
+      if (runs.length > 0 && !selectedPredRunId) {
+        loadPredResults(runs[0].id)
+      }
+    } catch (_err) {
+      setPredictionRuns([])
+    } finally {
+      setPredRunsLoading(false)
+    }
+  }
+
+  async function loadPredResults(runId, pageNum = 1, pageSz = predPageSize, anomalyOnly = predAnomalyOnly) {
+    if (!runId) return
+    setSelectedPredRunId(runId)
+    setPredResultsLoading(true)
+    setPredResultsError('')
+    try {
+      const [results, report] = await Promise.all([
+        getUnsupervisedPredictionResults(runId, { page: pageNum, page_size: pageSz, anomaly_only: anomalyOnly }),
+        getUnsupervisedPredictionReport(runId),
+      ])
+      setPredResults(results)
+      setPredReport(report)
+    } catch (err) {
+      setPredResultsError(extractErrorMessage(err, 'No se pudieron cargar los resultados.'))
+    } finally {
+      setPredResultsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'apply') {
+      loadTrainedModels()
+      loadPreprocessedRuns()
+      loadPredictionRuns()
+    }
+  }, [activeTab])
+
+  // Auto-populate consensus selectors when a dataset has 2+ completed runs
+  useEffect(() => {
+    if (completedRunsByDataset.length === 0) return
+    const [, runs] = completedRunsByDataset[0]
+    // Prefer a pair with different algorithms
+    const seen = new Set()
+    const pair = []
+    for (const r of runs) {
+      if (!seen.has(r.algorithm)) { seen.add(r.algorithm); pair.push(r) }
+      if (pair.length === 2) break
+    }
+    if (pair.length < 2) { pair.push(...runs.filter(r => !pair.includes(r)).slice(0, 2 - pair.length)) }
+    if (pair.length === 2 && !consensusRunIdA && !consensusRunIdB) {
+      setConsensusRunIdA(String(pair[0].id))
+      setConsensusRunIdB(String(pair[1].id))
+    }
+  }, [completedRunsByDataset])
+
+  useEffect(() => {
+    if (!applyPollRunId) return
+    const interval = setInterval(async () => {
+      try {
+        const statusData = await getUnsupervisedInferenceStatus(applyPollRunId)
+        setApplyRunStatus(statusData.status)
+        if (statusData.status === 'COMPLETED') {
+          clearInterval(interval)
+          setApplyPollRunId(null)
+          setApplyLoading(false)
+          setApplySuccess(`Modelo aplicado exitosamente. Run ID: ${statusData.id}. Registros analizados: ${statusData.total_analyzed?.toLocaleString('es-ES')}.`)
+          await loadPredictionRuns()
+          loadPredResults(applyPollRunId, 1, predPageSize, predAnomalyOnly)
+        } else if (statusData.status === 'FAILED') {
+          clearInterval(interval)
+          setApplyPollRunId(null)
+          setApplyLoading(false)
+          setApplyError(statusData.error_message || 'La inferencia falló. Revise los logs del servidor.')
+        }
+      } catch (err) {
+        clearInterval(interval)
+        setApplyPollRunId(null)
+        setApplyLoading(false)
+        setApplyError('No se pudo obtener el estado de la inferencia.')
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [applyPollRunId])
+
+  async function handleCompareRuns() {
+    if (!consensusRunIdA || !consensusRunIdB) return
+    setConsensusLoading(true)
+    setConsensusError('')
+    setConsensusData(null)
+    try {
+      const data = await compareUnsupervisedRuns(Number(consensusRunIdA), Number(consensusRunIdB))
+      setConsensusData(data)
+    } catch (err) {
+      setConsensusError(extractErrorMessage(err, 'No se pudo comparar las ejecuciones.'))
+    } finally {
+      setConsensusLoading(false)
+    }
+  }
+
+  async function handleApplyModel(event) {
+    event.preventDefault()
+    if (!selectedModelId) {
+      setApplyError('Seleccione un modelo entrenado.')
+      return
+    }
+    if (applyInputType === 'csv_upload' && !applyCsvFile) {
+      setApplyError('Seleccione un archivo CSV.')
+      return
+    }
+    if (applyInputType === 'preprocessed_run' && !applyPreprocessedRunId) {
+      setApplyError('Seleccione un preprocessed_run.')
+      return
+    }
+    setApplyLoading(true)
+    setApplyError('')
+    setApplySuccess('')
+    setApplyRunStatus('')
+    try {
+      const formData = new FormData()
+      formData.append('model_registry_id', selectedModelId)
+      formData.append('input_type', applyInputType)
+      if (applyInputType === 'csv_upload') {
+        formData.append('file', applyCsvFile)
+      } else {
+        formData.append('preprocessed_run_id', applyPreprocessedRunId)
+      }
+      const result = await applyUnsupervisedModel(formData)
+      // Backend returns 202 with run_id; polling useEffect takes over from here
+      setApplyRunStatus('PENDING')
+      setApplyPollRunId(result.run_id)
+    } catch (err) {
+      setApplyError(extractErrorMessage(err, 'No se pudo iniciar la inferencia.'))
+      setApplyLoading(false)
+    }
+  }
 
   const anomalyColumns = [
     { key: 'anomaly_rank', title: 'Prioridad' },
@@ -745,9 +966,28 @@ export default function Models() {
         </div>
       </div>
 
-      <div className="card warning-banner">
-        Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.
+      <div className="tab-nav card">
+        <button
+          type="button"
+          className={`tab-btn${activeTab === 'training' ? ' tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('training')}
+        >
+          Entrenamiento / Resultados actuales
+        </button>
+        <button
+          type="button"
+          className={`tab-btn${activeTab === 'apply' ? ' tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('apply')}
+        >
+          Aplicar modelo entrenado
+        </button>
       </div>
+
+      {activeTab === 'training' && (
+        <>
+          <div className="card warning-banner">
+            Las anomalías detectadas por los modelos no supervisados no representan fraude confirmado. Son señales de comportamiento atípico que requieren revisión.
+          </div>
 
       <div className="card detail-section">
         <h3>¿Cómo funcionan estos modelos?</h3>
@@ -1171,6 +1411,343 @@ export default function Models() {
             </div>
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {activeTab === 'apply' && (
+        <>
+          <div className="card warning-banner" style={{ background: '#3d2e00', borderLeft: '4px solid #f7b955', color: '#ffe082' }}>
+            <strong>Advertencia metodológica:</strong> Las anomalías detectadas por modelos no supervisados representan comportamientos atípicos y no constituyen fraude confirmado. No se genera is_fraud ni confirmed_fraud.
+          </div>
+
+          <div className="card detail-section">
+            <h3>Seleccionar origen del dataset</h3>
+            <div className="filters-grid">
+              <div className="form-row">
+                <label>Origen de datos</label>
+                <select className="input" value={applyInputType} onChange={(e) => { setApplyInputType(e.target.value); setApplyCsvFile(null); setApplyPreprocessedRunId('') }}>
+                  <option value="preprocessed_run">Usar preprocessed_run existente</option>
+                  <option value="csv_upload">Subir archivo CSV nuevo</option>
+                </select>
+              </div>
+              {applyInputType === 'csv_upload' && (
+                <div className="form-row">
+                  <label>Archivo CSV</label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    className="input"
+                    onChange={(e) => setApplyCsvFile(e.target.files[0] || null)}
+                  />
+                  {applyCsvFile && <div className="field-help">Seleccionado: {applyCsvFile.name}</div>}
+                </div>
+              )}
+              {applyInputType === 'preprocessed_run' && (
+                <div className="form-row">
+                  <label>Preprocessed run</label>
+                  {preprocessedRunsLoading ? (
+                    <div className="empty-state">Cargando runs...</div>
+                  ) : (
+                    <select className="input" value={applyPreprocessedRunId} onChange={(e) => setApplyPreprocessedRunId(e.target.value)}>
+                      <option value="">— Seleccionar —</option>
+                      {preprocessedRuns.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          Run #{r.id} — {r.total_records?.toLocaleString('es-ES') ?? '?'} registros — {r.finished_at ? new Date(r.finished_at).toLocaleDateString('es-ES') : 'N/A'}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card detail-section">
+            <h3>Modelos entrenados disponibles</h3>
+            <p className="section-help">Solo se muestran modelos con estado AVAILABLE. El modelo NO se reentrenará.</p>
+            {trainedModelsLoading ? (
+              <div className="empty-state">Cargando modelos...</div>
+            ) : trainedModelsError ? (
+              <div className="status-banner status-error">{trainedModelsError}</div>
+            ) : trainedModels.length === 0 ? (
+              <div className="empty-state">No hay modelos entrenados disponibles. Entrene primero un modelo en la pestaña de Entrenamiento.</div>
+            ) : (
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Seleccionar</th>
+                      <th>Algoritmo</th>
+                      <th>source_run</th>
+                      <th>Fecha</th>
+                      <th>Estado</th>
+                      <th>Tasa anomalías</th>
+                      <th>Contamination</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trainedModels.map((m) => (
+                      <tr key={m.id} className={selectedModelId === m.id ? 'selected-row' : ''} style={{ cursor: 'pointer' }} onClick={() => setSelectedModelId(m.id)}>
+                        <td>
+                          <input type="radio" name="selectedModel" checked={selectedModelId === m.id} onChange={() => setSelectedModelId(m.id)} />
+                        </td>
+                        <td>{m.algorithm}</td>
+                        <td>{m.source_run}</td>
+                        <td>{m.created_at ? new Date(m.created_at).toLocaleDateString('es-ES') : 'N/A'}</td>
+                        <td><span className={`status-badge${m.status === 'AVAILABLE' ? ' status-badge-ok' : ''}`}>{m.status}</span></td>
+                        <td>{m.anomaly_rate !== null && m.anomaly_rate !== undefined ? `${(m.anomaly_rate * 100).toFixed(2)}%` : 'N/A'}</td>
+                        <td>{m.contamination ?? 'N/A'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card detail-section">
+            <form onSubmit={handleApplyModel}>
+              {applyError && <div className="status-banner status-error">{applyError}</div>}
+              {applySuccess && <div className="status-banner status-ok">{applySuccess}</div>}
+              <div className="action-row">
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={applyLoading || !selectedModelId || (applyInputType === 'csv_upload' && !applyCsvFile) || (applyInputType === 'preprocessed_run' && !applyPreprocessedRunId)}
+                >
+                  {applyLoading ? 'Procesando...' : 'Aplicar modelo'}
+                </button>
+                {applyLoading && (
+                  <span className="section-help">
+                    {applyRunStatus === 'PENDING' && 'Iniciando inferencia…'}
+                    {applyRunStatus === 'RUNNING' && 'Analizando dataset. Este proceso puede tardar varios minutos para datasets grandes…'}
+                    {!applyRunStatus && 'Enviando solicitud…'}
+                  </span>
+                )}
+              </div>
+            </form>
+          </div>
+
+          {predictionRuns.length > 0 && (
+            <div className="card detail-section">
+              <h3>Resultados de ejecuciones anteriores</h3>
+              <div className="form-row">
+                <label>Seleccionar ejecución</label>
+                <select className="input" value={selectedPredRunId} onChange={(e) => loadPredResults(Number(e.target.value))}>
+                  <option value="">— Seleccionar —</option>
+                  {predictionRuns.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      Run #{r.id} — {r.algorithm} — {r.input_source} — {r.status} — {r.created_at ? new Date(r.created_at).toLocaleDateString('es-ES') : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {selectedPredRunId && predReport && (
+            <>
+              <div className="kpi-grid">
+                <KPICard title="Registros analizados" value={predReport.total_analyzed?.toLocaleString('es-ES') ?? 'N/A'} />
+                <KPICard title="Anomalías detectadas" value={predReport.anomaly_count?.toLocaleString('es-ES') ?? 'N/A'} />
+                <KPICard title="Porcentaje de anomalías" value={predReport.anomaly_rate !== null && predReport.anomaly_rate !== undefined ? `${(predReport.anomaly_rate * 100).toFixed(2)}%` : 'N/A'} />
+                <KPICard title="Modelo aplicado" value={predReport.algorithm ?? 'N/A'} />
+                <KPICard title="Dataset utilizado" value={predReport.input_source ?? 'N/A'} />
+              </div>
+
+              {predReport.score_distribution?.length > 0 && (
+                <SimpleBarChart
+                  title="Distribución de scores / errores"
+                  items={predReport.score_distribution.map((b) => ({ label: b.bucket, value: b.count, displayValue: String(b.count) }))}
+                  emptyText="Sin datos de distribución."
+                />
+              )}
+            </>
+          )}
+
+          {selectedPredRunId && (
+            <div className="card detail-section">
+              <h3>Resultados detallados</h3>
+              <div className="filters-grid">
+                <div className="form-row">
+                  <label>
+                    <input type="checkbox" checked={predAnomalyOnly} onChange={(e) => { setPredAnomalyOnly(e.target.checked); loadPredResults(selectedPredRunId, 1, predPageSize, e.target.checked) }} />
+                    {' '}Solo anomalías
+                  </label>
+                </div>
+                <div className="form-row">
+                  <label>Registros por página</label>
+                  <select className="input" value={predPageSize} onChange={(e) => { setPredPageSize(Number(e.target.value)); loadPredResults(selectedPredRunId, 1, Number(e.target.value), predAnomalyOnly) }}>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              {predResultsLoading ? (
+                <div className="empty-state">Cargando resultados...</div>
+              ) : predResultsError ? (
+                <div className="status-banner status-error">{predResultsError}</div>
+              ) : predResults.rows?.length > 0 ? (
+                <>
+                  <div className="table-scroll">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Prioridad</th>
+                          <th>ID Transacción</th>
+                          <th>Cliente</th>
+                          <th>Fecha</th>
+                          <th>Monto</th>
+                          <th>Score / Error</th>
+                          <th>Anomalía</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {predResults.rows.map((row, idx) => {
+                          const score = row.anomaly_score ?? row.reconstruction_error ?? row.autoencoder_anomaly_score
+                          const flag = row.anomaly_flag ?? row.autoencoder_anomaly_flag
+                          return (
+                            <tr key={row.transaction_id || idx}>
+                              <td>{row.anomaly_rank ?? 'N/A'}</td>
+                              <td>{row.transaction_id || 'N/A'}</td>
+                              <td>{row.customer_hash || 'N/A'}</td>
+                              <td>{row.transaction_datetime ? new Date(row.transaction_datetime).toLocaleDateString('es-ES') : 'N/A'}</td>
+                              <td>{row.amount != null ? Number(row.amount).toFixed(2) : 'N/A'}</td>
+                              <td>{score != null ? Number(score).toFixed(6) : 'N/A'}</td>
+                              <td>{Number(flag) === 1 ? '✓ Sí' : 'No'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="pagination-bar">
+                    <button className="button button-secondary" disabled={predPage <= 1} onClick={() => { const p = predPage - 1; setPredPage(p); loadPredResults(selectedPredRunId, p, predPageSize, predAnomalyOnly) }}>Anterior</button>
+                    <span>Página {predPage} — {predResults.total?.toLocaleString('es-ES') ?? '?'} registros total</span>
+                    <button className="button button-secondary" disabled={predPage * predPageSize >= (predResults.total || 0)} onClick={() => { const p = predPage + 1; setPredPage(p); loadPredResults(selectedPredRunId, p, predPageSize, predAnomalyOnly) }}>Siguiente</button>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">No hay resultados disponibles para esta ejecución.</div>
+              )}
+            </div>
+          )}
+
+          {completedRunsByDataset.length > 0 && (
+            <div className="card detail-section consensus-section">
+              <h3>Análisis de consenso entre modelos</h3>
+              <p className="section-help">
+                Las transacciones detectadas por <strong>más de un modelo</strong> tienen mayor probabilidad de representar comportamientos genuinamente atípicos.
+                Compara dos ejecuciones sobre el mismo dataset para priorizar la revisión.
+              </p>
+
+              <div className="consensus-selectors">
+                <div className="form-row">
+                  <label>Modelo A</label>
+                  <select className="input" value={consensusRunIdA} onChange={e => { setConsensusRunIdA(e.target.value); setConsensusData(null) }}>
+                    <option value="">— Seleccionar —</option>
+                    {predictionRuns.filter(r => r.status === 'COMPLETED').map(r => (
+                      <option key={r.id} value={r.id}>
+                        Run #{r.id} — {r.algorithm} — {r.input_source}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <label>Modelo B</label>
+                  <select className="input" value={consensusRunIdB} onChange={e => { setConsensusRunIdB(e.target.value); setConsensusData(null) }}>
+                    <option value="">— Seleccionar —</option>
+                    {predictionRuns.filter(r => r.status === 'COMPLETED').map(r => (
+                      <option key={r.id} value={r.id}>
+                        Run #{r.id} — {r.algorithm} — {r.input_source}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={!consensusRunIdA || !consensusRunIdB || consensusRunIdA === consensusRunIdB || consensusLoading}
+                  onClick={handleCompareRuns}
+                >
+                  {consensusLoading ? 'Comparando…' : 'Comparar modelos'}
+                </button>
+              </div>
+
+              {consensusError && <div className="status-banner status-error">{consensusError}</div>}
+
+              {consensusData && (
+                <>
+                  <div className="consensus-kpi-row">
+                    <div className="consensus-kpi-box">
+                      <div className="consensus-kpi-label">Solo {consensusData.run_a.algorithm}</div>
+                      <div className="consensus-kpi-value">{consensusData.only_in_a?.toLocaleString('es-ES')}</div>
+                      <div className="consensus-kpi-sub">anomalías exclusivas</div>
+                    </div>
+                    <div className="consensus-kpi-box consensus-kpi-highlight">
+                      <div className="consensus-kpi-label">DETECTADAS POR AMBOS</div>
+                      <div className="consensus-kpi-value">{consensusData.intersection_count?.toLocaleString('es-ES')}</div>
+                      <div className="consensus-kpi-sub">de {consensusData.total_analyzed?.toLocaleString('es-ES')} registros · acuerdo {consensusData.agreement_rate_pct}%</div>
+                    </div>
+                    <div className="consensus-kpi-box">
+                      <div className="consensus-kpi-label">Solo {consensusData.run_b.algorithm}</div>
+                      <div className="consensus-kpi-value">{consensusData.only_in_b?.toLocaleString('es-ES')}</div>
+                      <div className="consensus-kpi-sub">anomalías exclusivas</div>
+                    </div>
+                  </div>
+
+                  <div className="status-banner" style={{ background: 'rgba(247,185,85,0.1)', borderColor: 'rgba(247,185,85,0.3)', color: '#ffe082', marginTop: '12px' }}>
+                    Las <strong>{consensusData.intersection_count?.toLocaleString('es-ES')} transacciones</strong> de abajo fueron marcadas simultáneamente por <strong>{consensusData.run_a.algorithm}</strong> y <strong>{consensusData.run_b.algorithm}</strong>.
+                    Dos algoritmos independientes (uno basado en redes neuronales, otro en árboles de decisión) coinciden en señalarlas como atípicas.
+                    Priorice su revisión manual. {consensusData.methodology_warning}
+                  </div>
+
+                  {consensusData.rows?.length > 0 ? (
+                    <div className="table-scroll" style={{ marginTop: '16px' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th title="Ordenado por suma de ranking en ambos modelos">Prioridad consenso</th>
+                            <th>ID Transacción</th>
+                            <th>Cliente</th>
+                            <th>Fecha</th>
+                            <th>Monto</th>
+                            <th>País</th>
+                            <th title={`Ranking en ${consensusData.run_a.algorithm}`}>Rank {consensusData.run_a.algorithm}</th>
+                            <th title={`Score de anomalía en ${consensusData.run_a.algorithm}`}>Score {consensusData.run_a.algorithm}</th>
+                            <th title={`Ranking en ${consensusData.run_b.algorithm}`}>Rank {consensusData.run_b.algorithm}</th>
+                            <th title={`Score de anomalía en ${consensusData.run_b.algorithm}`}>Score {consensusData.run_b.algorithm}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {consensusData.rows.map((row, idx) => (
+                            <tr key={row.transaction_id || idx} className="consensus-row">
+                              <td><span className="consensus-badge">{row.consensus_priority}</span></td>
+                              <td>{row.transaction_id || 'N/A'}</td>
+                              <td>{row.customer_hash || 'N/A'}</td>
+                              <td>{row.transaction_datetime ? new Date(row.transaction_datetime).toLocaleDateString('es-ES') : 'N/A'}</td>
+                              <td>{row.amount != null ? Number(row.amount).toLocaleString('es-ES', { minimumFractionDigits: 2 }) : 'N/A'}</td>
+                              <td>{row.country_code || 'N/A'}</td>
+                              <td>{row[`rank_${consensusData.run_a.algorithm}`] ?? 'N/A'}</td>
+                              <td>{row[`score_${consensusData.run_a.algorithm}`] != null ? Number(row[`score_${consensusData.run_a.algorithm}`]).toFixed(4) : 'N/A'}</td>
+                              <td>{row[`rank_${consensusData.run_b.algorithm}`] ?? 'N/A'}</td>
+                              <td>{row[`score_${consensusData.run_b.algorithm}`] != null ? Number(row[`score_${consensusData.run_b.algorithm}`]).toFixed(4) : 'N/A'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">No hay transacciones en común entre los dos modelos.</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
