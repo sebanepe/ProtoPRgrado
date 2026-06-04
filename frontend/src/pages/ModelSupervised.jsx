@@ -12,7 +12,14 @@ import {
   getSupervisedTrainingPreflight,
   getSupervisedTrainingRuns,
   trainHumanSupervisedModel,
-  validateHumanDataset
+  validateHumanDataset,
+  getSupInferenceTrainedModels,
+  getSupInferencePreprocessedRuns,
+  applySupInferenceModel,
+  getSupInferenceStatus,
+  getSupInferencePredictionRuns,
+  getSupInferencePredictionResults,
+  getSupInferencePredictionReport
 } from '../services/api'
 
 const DEFAULT_SOURCE_RUN = 'preprocessed_run_26'
@@ -320,6 +327,9 @@ function FriendlyPredictionsTable({ rows, emptyText = 'No existen predicciones p
 }
 
 export default function ModelSupervised() {
+  const [activeTab, setActiveTab] = useState('training')
+
+  // ── Training tab state ──────────────────────────────────────────────────────
   const [sourceRun, setSourceRun] = useState(DEFAULT_SOURCE_RUN)
   const [summary, setSummary] = useState(null)
   const [readiness, setReadiness] = useState(null)
@@ -337,6 +347,27 @@ export default function ModelSupervised() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [modelConfig, setModelConfig] = useState({ model_type: 'random_forest', test_size: '0.2', random_state: '42', use_smote: false })
+
+  // ── Apply tab state ─────────────────────────────────────────────────────────
+  const [supTrainedModels, setSupTrainedModels] = useState([])
+  const [supPreprocessedRuns, setSupPreprocessedRuns] = useState([])
+  const [supSelectedModelId, setSupSelectedModelId] = useState('')
+  const [supInputType, setSupInputType] = useState('preprocessed_run')
+  const [supCsvFile, setSupCsvFile] = useState(null)
+  const [supPreprocessedRunId, setSupPreprocessedRunId] = useState('')
+  const [supApplyLoading, setSupApplyLoading] = useState(false)
+  const [supApplyError, setSupApplyError] = useState('')
+  const [supApplySuccess, setSupApplySuccess] = useState('')
+  const [supPredRuns, setSupPredRuns] = useState([])
+  const [supSelectedPredRunId, setSupSelectedPredRunId] = useState('')
+  const [supPredResults, setSupPredResults] = useState({ rows: [], total: 0 })
+  const [supPredReport, setSupPredReport] = useState(null)
+  const [supPollRunId, setSupPollRunId] = useState(null)
+  const [supPollStatus, setSupPollStatus] = useState('')
+  const [supPriorityFilter, setSupPriorityFilter] = useState('ALL')
+  const [supPredPage, setSupPredPage] = useState(1)
+  const [supSameRunWarning, setSupSameRunWarning] = useState(null)
+  const SUP_PAGE_SIZE = 50
 
   const normalizedRun = sourceRun.trim() || DEFAULT_SOURCE_RUN
 
@@ -393,6 +424,110 @@ export default function ModelSupervised() {
   useEffect(() => {
     if (trainingRuns.length) loadModelDetails(selectedModel, 1)
   }, [selectedModel, trainingRuns.length])
+
+  // ── Apply tab loaders ──────────────────────────────────────────────────────
+  const loadSupTrainedModels = async () => {
+    try { setSupTrainedModels(await getSupInferenceTrainedModels()) } catch (_) {}
+  }
+  const loadSupPreprocessedRuns = async () => {
+    try { setSupPreprocessedRuns(await getSupInferencePreprocessedRuns() ?? []) } catch (_) {}
+  }
+  const loadSupPredRuns = async () => {
+    try { setSupPredRuns(await getSupInferencePredictionRuns()) } catch (_) {}
+  }
+  const loadSupPredResults = async (runId, page, priorityFilter) => {
+    try {
+      const data = await getSupInferencePredictionResults(runId, { page, page_size: SUP_PAGE_SIZE, priority_filter: priorityFilter })
+      setSupPredResults(data)
+    } catch (_) {}
+  }
+  const loadSupPredReport = async (runId) => {
+    try { setSupPredReport(await getSupInferencePredictionReport(runId)) } catch (_) {}
+  }
+
+  useEffect(() => {
+    if (activeTab === 'apply') {
+      loadSupTrainedModels()
+      loadSupPreprocessedRuns()
+      loadSupPredRuns()
+    }
+  }, [activeTab])
+
+  // Polling useEffect
+  useEffect(() => {
+    if (!supPollRunId) return
+    const interval = setInterval(async () => {
+      try {
+        const statusData = await getSupInferenceStatus(supPollRunId)
+        setSupPollStatus(statusData.status)
+        if (statusData.status === 'COMPLETED') {
+          clearInterval(interval)
+          setSupPollRunId(null)
+          setSupApplyLoading(false)
+          setSupApplySuccess(`Modelo aplicado. Run ID: ${statusData.id} — ${statusData.total_analyzed?.toLocaleString()} alertas analizadas.`)
+          setSupSameRunWarning(statusData.same_run_warning || null)
+          setSupSelectedPredRunId(String(supPollRunId))
+          await loadSupPredRuns()
+          await loadSupPredResults(supPollRunId, 1, 'ALL')
+          await loadSupPredReport(supPollRunId)
+          setSupPriorityFilter('ALL')
+          setSupPredPage(1)
+        } else if (statusData.status === 'FAILED') {
+          clearInterval(interval)
+          setSupPollRunId(null)
+          setSupApplyLoading(false)
+          setSupApplyError(statusData.error_message || 'La inferencia supervisada falló.')
+        }
+      } catch (_) {
+        clearInterval(interval)
+        setSupPollRunId(null)
+        setSupApplyLoading(false)
+        setSupApplyError('No se pudo obtener el estado de la inferencia.')
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [supPollRunId])
+
+  const handleSupApplyModel = async (event) => {
+    event.preventDefault()
+    if (!supSelectedModelId) { setSupApplyError('Seleccione un modelo entrenado.'); return }
+    if (supInputType === 'csv_upload' && !supCsvFile) { setSupApplyError('Seleccione un archivo CSV.'); return }
+    if (supInputType === 'preprocessed_run' && !supPreprocessedRunId) { setSupApplyError('Seleccione un preprocessed_run.'); return }
+    setSupApplyLoading(true)
+    setSupApplyError('')
+    setSupApplySuccess('')
+    setSupSameRunWarning(null)
+    try {
+      const formData = new FormData()
+      formData.append('model_registry_id', supSelectedModelId)
+      formData.append('input_type', supInputType)
+      if (supInputType === 'csv_upload') { formData.append('file', supCsvFile) }
+      else { formData.append('preprocessed_run_id', supPreprocessedRunId) }
+      const result = await applySupInferenceModel(formData)
+      setSupPollStatus('PENDING')
+      setSupPollRunId(result.run_id)
+    } catch (err) {
+      const detail = err?.response?.data?.detail
+      setSupApplyError(typeof detail === 'string' ? detail : 'No se pudo iniciar la inferencia.')
+      setSupApplyLoading(false)
+    }
+  }
+
+  const handleSupFilterChange = async (newFilter) => {
+    setSupPriorityFilter(newFilter)
+    setSupPredPage(1)
+    if (supSelectedPredRunId) await loadSupPredResults(supSelectedPredRunId, 1, newFilter)
+  }
+
+  const handleSupSelectRun = async (runId) => {
+    setSupSelectedPredRunId(runId)
+    setSupPriorityFilter('ALL')
+    setSupPredPage(1)
+    if (runId) {
+      await loadSupPredResults(runId, 1, 'ALL')
+      await loadSupPredReport(runId)
+    }
+  }
 
   const currentPositive = safeNumber(summary?.usable_positive_labels ?? readiness?.current?.positive)
   const currentNegative = safeNumber(summary?.usable_negative_labels ?? readiness?.current?.negative)
@@ -527,6 +662,17 @@ export default function ModelSupervised() {
       </div>
 
       <div className="card warning-banner">{METHODOLOGY_MESSAGE}</div>
+
+      <div className="tab-bar" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button className={activeTab === 'training' ? 'tab active' : 'tab'} onClick={() => setActiveTab('training')}>
+          Dataset / Entrenamiento / Métricas
+        </button>
+        <button className={activeTab === 'apply' ? 'tab active' : 'tab'} onClick={() => setActiveTab('apply')}>
+          Aplicar modelo entrenado
+        </button>
+      </div>
+
+      {activeTab === 'training' && <>
       <div className="card warning-banner">
         Este modulo usa unicamente revisiones humanas. Las reglas, anomaly_flag, autoencoder_anomaly_flag y risk_score pueden ser senales analiticas, pero no etiquetas de fraude. CONFIRMED_FRAUD es clase positiva; DISMISSED es clase negativa; NEW, IN_REVIEW y FALSE_POSITIVE se excluyen del entrenamiento.
       </div>
@@ -795,6 +941,279 @@ export default function ModelSupervised() {
         <p>{METHODOLOGY_MESSAGE}</p>
         <p>MLP queda bloqueado mientras no exista la meta recomendada de 50 CONFIRMED_FRAUD y 120 DISMISSED.</p>
       </div>
+      </>}
+
+      {activeTab === 'apply' && (
+        <div>
+          <div className="card warning-banner" style={{ background: '#3d2e00', color: '#ffe082', marginBottom: 16 }}>
+            Las predicciones generadas por modelos supervisados son apoyo analítico y no constituyen fraude confirmado automático. No se reentrenan modelos.
+          </div>
+
+          {/* Selector de modelo entrenado */}
+          <div className="card">
+            <h3>1. Seleccionar modelo entrenado</h3>
+            {supTrainedModels.length === 0
+              ? <div className="detail-status" style={{ padding: 12, borderRadius: 8 }}>No hay modelos supervisados AVAILABLE. Entrene un modelo primero en la pestaña anterior.</div>
+              : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Algoritmo</th>
+                        <th>source_run</th>
+                        <th>F1-score</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>ROC-AUC</th>
+                        <th>Estado</th>
+                        <th>Fecha</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supTrainedModels.map((m) => (
+                        <tr key={m.id} style={{ cursor: 'pointer', background: supSelectedModelId === String(m.id) ? 'rgba(56,214,214,0.08)' : undefined }} onClick={() => setSupSelectedModelId(String(m.id))}>
+                          <td><input type="radio" readOnly checked={supSelectedModelId === String(m.id)} aria-label={`Seleccionar ${m.algorithm}`} /></td>
+                          <td><strong>{MODEL_LABELS[m.algorithm] || m.algorithm}</strong></td>
+                          <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{m.source_run}</td>
+                          <td>{m.f1_score != null ? Number(m.f1_score).toFixed(4) : 'N/A'}</td>
+                          <td>{m.precision != null ? Number(m.precision).toFixed(4) : 'N/A'}</td>
+                          <td>{m.recall != null ? Number(m.recall).toFixed(4) : 'N/A'}</td>
+                          <td>{m.roc_auc != null ? Number(m.roc_auc).toFixed(4) : 'N/A'}</td>
+                          <td><StatusBadge tone="success">{m.status}</StatusBadge></td>
+                          <td style={{ fontSize: 12 }}>{m.created_at ? m.created_at.slice(0, 10) : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            }
+          </div>
+
+          {/* Selector de dataset */}
+          <div className="card">
+            <h3>2. Origen del dataset de alertas</h3>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="radio" value="preprocessed_run" checked={supInputType === 'preprocessed_run'} onChange={() => setSupInputType('preprocessed_run')} />
+                Usar alertas generadas para un preprocessed_run
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="radio" value="csv_upload" checked={supInputType === 'csv_upload'} onChange={() => setSupInputType('csv_upload')} />
+                Subir CSV de resumen de alertas
+              </label>
+            </div>
+            {supInputType === 'preprocessed_run' && (
+              <div>
+                <select className="input" value={supPreprocessedRunId} onChange={(e) => setSupPreprocessedRunId(e.target.value)} style={{ maxWidth: 540 }}>
+                  <option value="">— Seleccione un preprocessed_run —</option>
+                  {supPreprocessedRuns.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.source_run || `Run #${r.id}`} — {r.total_records != null ? `${r.total_records.toLocaleString()} registros` : ''} — {r.finished_at?.slice(0, 10)}
+                    </option>
+                  ))}
+                </select>
+                {supPreprocessedRuns.length === 0 && (
+                  <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 13 }}>
+                    No hay preprocessing runs completados disponibles.
+                  </div>
+                )}
+                <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+                  El backend buscará automáticamente las alertas generadas por el motor de reglas para este run. Si no existen, se mostrará un error con instrucciones.
+                </div>
+              </div>
+            )}
+            {supInputType === 'csv_upload' && (
+              <div>
+                <input type="file" accept=".csv" className="input" onChange={(e) => setSupCsvFile(e.target.files?.[0] || null)} style={{ maxWidth: 480 }} />
+                {supCsvFile && <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 13 }}>Archivo seleccionado: {supCsvFile.name}</div>}
+                <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 12 }}>
+                  El CSV debe tener esquema de resumen de alertas: rule_code, rule_name, summary_alert_id, countries_detected, merchant_rubro_values, etc. No se aceptan CSVs de transacciones crudas.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Botón Aplicar */}
+          <div className="card">
+            <h3>3. Aplicar modelo</h3>
+            {supApplyError && <div className="detail-status detail-status-error" style={{ padding: 12, borderRadius: 8, marginBottom: 12 }}>{supApplyError}</div>}
+            {supApplySuccess && <div className="detail-status detail-status-success" style={{ padding: 12, borderRadius: 8, marginBottom: 12 }}>{supApplySuccess}</div>}
+            {supApplyLoading && (
+              <div style={{ marginBottom: 12, color: 'var(--text-muted)' }}>
+                Procesando... estado: <strong>{supPollStatus}</strong>. El análisis puede tardar varios minutos según el tamaño del dataset.
+              </div>
+            )}
+            <button className="button" onClick={handleSupApplyModel} disabled={supApplyLoading || !supSelectedModelId}>
+              {supApplyLoading ? 'Aplicando modelo...' : 'Aplicar modelo entrenado'}
+            </button>
+          </div>
+
+          {/* Historial de runs */}
+          {supPredRuns.length > 0 && (
+            <div className="card">
+              <h3>Historial de ejecuciones</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table">
+                  <thead>
+                    <tr><th>ID</th><th>Algoritmo</th><th>Dataset</th><th>Total</th><th>HIGH</th><th>MEDIUM</th><th>LOW</th><th>Estado</th><th>Fecha</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {supPredRuns.map((r) => (
+                      <tr key={r.id} style={{ background: supSelectedPredRunId === String(r.id) ? 'rgba(56,214,214,0.08)' : undefined }}>
+                        <td>{r.id}</td>
+                        <td>{MODEL_LABELS[r.algorithm] || r.algorithm}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.input_source}</td>
+                        <td>{r.total_analyzed?.toLocaleString()}</td>
+                        <td style={{ color: '#ff4757' }}>{r.high_count?.toLocaleString()}</td>
+                        <td style={{ color: '#f7b955' }}>{r.medium_count?.toLocaleString()}</td>
+                        <td style={{ color: '#2ed573' }}>{r.low_count?.toLocaleString()}</td>
+                        <td><StatusBadge tone={r.status === 'COMPLETED' ? 'success' : r.status === 'FAILED' ? 'error' : 'neutral'}>{r.status}</StatusBadge></td>
+                        <td style={{ fontSize: 12 }}>{r.finished_at?.slice(0, 10)}</td>
+                        <td>{r.status === 'COMPLETED' && <button className="button button-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleSupSelectRun(String(r.id))}>Ver</button>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Resultados */}
+          {supSelectedPredRunId && supPredResults.total >= 0 && (() => {
+            const run = supPredRuns.find((r) => String(r.id) === supSelectedPredRunId)
+            return (
+              <div>
+                {supSameRunWarning && (
+                  <div className="card warning-banner" style={{ background: '#1a2a1a', color: '#81c784', marginBottom: 16 }}>
+                    {supSameRunWarning}
+                  </div>
+                )}
+                {/* KPI cards */}
+                <div className="kpi-grid" style={{ marginBottom: 16 }}>
+                  <KPICard title="Total analizados" value={(run?.total_analyzed ?? supPredResults.total)?.toLocaleString()} />
+                  <KPICard title="Prioridad HIGH" value={(run?.high_count ?? 0)?.toLocaleString()} />
+                  <KPICard title="Prioridad MEDIUM" value={(run?.medium_count ?? 0)?.toLocaleString()} />
+                  <KPICard title="Prioridad LOW" value={(run?.low_count ?? 0)?.toLocaleString()} />
+                  <KPICard title="Modelo aplicado" value={MODEL_LABELS[run?.algorithm] || run?.algorithm || '—'} />
+                  <KPICard title="Dataset usado" value={run?.input_source || '—'} />
+                </div>
+
+                {/* Distribución por prioridad */}
+                {supPredReport?.priority_distribution?.length > 0 && (
+                  <div className="card" style={{ marginBottom: 16 }}>
+                    <h4 style={{ marginTop: 0 }}>Distribución por nivel de prioridad</h4>
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      {supPredReport.priority_distribution.map((item) => {
+                        const total = supPredReport.priority_distribution.reduce((s, x) => s + x.count, 0)
+                        const pct = total > 0 ? Math.round((item.count / total) * 100) : 0
+                        const cfg = { HIGH: { color: '#ff4757', label: 'HIGH — Revisión prioritaria' }, MEDIUM: { color: '#f7b955', label: 'MEDIUM — Revisión normal' }, LOW: { color: '#2ed573', label: 'LOW — Baja prioridad' } }
+                        const c = cfg[item.level] || { color: '#747d8c', label: item.level }
+                        return (
+                          <div key={item.level} style={{ flex: '1 1 160px', textAlign: 'center' }}>
+                            <div style={{ height: 80, background: 'rgba(4,12,22,0.45)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'flex-end' }}>
+                              <div style={{ width: '100%', height: `${pct}%`, background: c.color, transition: 'height 0.4s' }} />
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: c.color }}>{item.level}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.count?.toLocaleString()} ({pct}%)</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.label}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tabla de resultados con filtros */}
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+                    <h4 style={{ margin: 0 }}>Resultados — {supPredResults.total?.toLocaleString()} registros {supPriorityFilter !== 'ALL' ? `(filtro: ${supPriorityFilter})` : ''}</h4>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {['ALL', 'HIGH', 'MEDIUM', 'LOW'].map((f) => {
+                        const colors = { HIGH: '#ff4757', MEDIUM: '#f7b955', LOW: '#2ed573', ALL: 'var(--accent-blue)' }
+                        return (
+                          <button key={f} onClick={() => handleSupFilterChange(f)} style={{ padding: '4px 12px', borderRadius: 20, border: `1px solid ${supPriorityFilter === f ? colors[f] : 'rgba(255,255,255,0.12)'}`, background: supPriorityFilter === f ? `${colors[f]}22` : 'transparent', color: supPriorityFilter === f ? colors[f] : 'var(--text-muted)', cursor: 'pointer', fontSize: 13 }}>
+                            {f}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {supPredResults.rows?.length === 0
+                    ? <div className="detail-status" style={{ padding: 12, borderRadius: 8 }}>No hay resultados para este filtro.</div>
+                    : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>ID Alerta</th>
+                              <th>Cliente</th>
+                              <th>Prob. fraude</th>
+                              <th>Prioridad revisión</th>
+                              <th>Predicción</th>
+                              <th>Modelo</th>
+                              <th>source_run</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cleanRows(supPredResults.rows).map((row, idx) => {
+                              const priorityColors = { HIGH: '#ff4757', MEDIUM: '#f7b955', LOW: '#2ed573' }
+                              const pc = priorityColors[row.priority_level] || '#747d8c'
+                              return (
+                                <tr key={idx}>
+                                  <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(row.summary_alert_id ?? row.transaction_id ?? '')}</td>
+                                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{String(row.customer_hash ?? '')}</td>
+                                  <td style={{ textAlign: 'right' }}>{row.prediction_probability != null ? Number(row.prediction_probability).toFixed(4) : 'N/A'}</td>
+                                  <td>
+                                    <span style={{ background: `${pc}22`, color: pc, border: `1px solid ${pc}55`, borderRadius: 12, padding: '2px 10px', fontWeight: 700, fontSize: 12 }}>
+                                      {row.priority_level}
+                                    </span>
+                                  </td>
+                                  <td>{Number(row.prediction_label) === 1 ? 'Sospechoso' : 'Normal'}</td>
+                                  <td style={{ fontSize: 12 }}>{MODEL_LABELS[row.model_name] || row.model_name}</td>
+                                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{row.source_run ?? ''}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                        {supPredResults.total > SUP_PAGE_SIZE && (
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12 }}>
+                            <button className="button button-secondary" disabled={supPredPage <= 1} onClick={async () => { const p = supPredPage - 1; setSupPredPage(p); await loadSupPredResults(supSelectedPredRunId, p, supPriorityFilter) }}>← Anterior</button>
+                            <span style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Pág. {supPredPage} · {supPredResults.total?.toLocaleString()} total</span>
+                            <button className="button button-secondary" disabled={supPredPage * SUP_PAGE_SIZE >= supPredResults.total} onClick={async () => { const p = supPredPage + 1; setSupPredPage(p); await loadSupPredResults(supSelectedPredRunId, p, supPriorityFilter) }}>Siguiente →</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                </div>
+
+                {/* Guía de interpretación */}
+                <div className="card" style={{ marginTop: 0 }}>
+                  <h4 style={{ marginTop: 0 }}>Guía de revisión de alertas para el analista</h4>
+                  <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: 13 }}>
+                    HIGH, MEDIUM y LOW indican prioridad de revisión de alerta, no fraude confirmado automático.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                    {[
+                      { level: 'HIGH', color: '#ff4757', title: 'Prioridad alta', desc: 'Prob. ≥ 70%. Revisar primero. El modelo tiene alta confianza en comportamiento sospechoso. Requiere revisión analítica.' },
+                      { level: 'MEDIUM', color: '#f7b955', title: 'Prioridad media', desc: 'Prob. 40–70%. Revisar en segundo turno. Señales mixtas; requiere criterio analítico antes de actuar.' },
+                      { level: 'LOW', color: '#2ed573', title: 'Baja prioridad', desc: 'Prob. < 40%. Comportamiento típico según el modelo. Revisar si el volumen lo permite.' },
+                    ].map((item) => (
+                      <div key={item.level} className="card" style={{ margin: 0, borderLeft: `3px solid ${item.color}` }}>
+                        <span style={{ color: item.color, fontWeight: 700 }}>{item.title}</span>
+                        <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{item.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      )}
     </div>
   )
 }

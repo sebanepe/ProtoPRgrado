@@ -462,6 +462,31 @@ class SupervisedDatasetRun(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
 
 
+class SupervisedInferenceRun(Base):
+    __tablename__ = "supervised_inference_runs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    model_registry_id = Column(Integer, nullable=True)
+    algorithm         = Column(String(255), nullable=False, index=True)
+    model_source_run  = Column(String(255), nullable=False, default="")
+    input_type        = Column(String(50), nullable=False)
+    input_source      = Column(String(255), nullable=True)
+    input_file        = Column(String(1024), nullable=True)
+    results_file      = Column(String(1024), nullable=True)
+    metadata_file     = Column(String(1024), nullable=True)
+    total_analyzed    = Column(Integer, nullable=False, default=0)
+    high_count        = Column(Integer, nullable=False, default=0)
+    medium_count      = Column(Integer, nullable=False, default=0)
+    low_count         = Column(Integer, nullable=False, default=0)
+    status            = Column(String(50), nullable=False, default="PENDING", index=True)
+    error_message     = Column(Text, nullable=True)
+    params_json       = Column(Text, nullable=True)
+    started_at        = Column(DateTime(timezone=True), nullable=True)
+    finished_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, onupdate=func.now())
+
+
 class ReportExport(Base):
     __tablename__ = "report_exports"
 

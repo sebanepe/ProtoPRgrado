@@ -132,6 +132,36 @@ def _pick_merchant_rubro_from_row(row) -> str:
     return "UNKNOWN"
 
 
+def _compute_transaction_ids(df: pd.DataFrame) -> pd.Series:
+    """Vectorized SHA256 transaction_id — replaces apply(axis=1) (~20x faster)."""
+    import hashlib
+    _tid_cols = ['transaction_datetime', 'amount', 'customer_hash', 'merchant_code',
+                 'terminal_code', 'reference_number', 'authorization_code',
+                 'transaction_type', 'transaction_category', 'process_code']
+
+    def _col(name):
+        return df[name].fillna('').astype(str) if name in df.columns else pd.Series('', index=df.index)
+
+    combined = _col(_tid_cols[0])
+    for c in _tid_cols[1:]:
+        combined = combined + '|' + _col(c)
+
+    return combined.map(lambda k: 'tx_' + hashlib.sha256(k.encode('utf-8')).hexdigest()[:16])
+
+
+def _pick_merchant_rubro_vectorized(df: pd.DataFrame) -> pd.Series:
+    """Vectorized merchant rubro selection — replaces apply(axis=1)."""
+    _rubro_cols = ['merchant_rubro_proxy', 'mcc_code', 'codigo_mcc', 'mcc',
+                   'rubro', 'codigo_rubro', 'merchant_category_code', 'categoria_comercio']
+    result = pd.Series('UNKNOWN', index=df.index, dtype=str)
+    for col in reversed(_rubro_cols):
+        if col in df.columns:
+            normalized = df[col].map(_normalize_merchant_rubro_value)
+            mask = normalized != 'UNKNOWN'
+            result[mask] = normalized[mask]
+    return result
+
+
 def _map_columns(df):
     # Return a dict mapping expected column -> actual df column name (or None)
     cols = {c: c for c in df.columns}
@@ -674,26 +704,8 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                 chunk['location'] = chunk['merchant_name']
 
             # early deterministic transaction id so it's present for validation
-            import hashlib
-            def _compute_tid_row_bg(row):
-                components = [
-                    str(row.get('transaction_datetime', '')),
-                    str(row.get('amount', '')),
-                    str(row.get('customer_hash', '')),
-                    str(row.get('merchant_code', '')),
-                    str(row.get('terminal_code', '')),
-                    str(row.get('reference_number', '')),
-                    str(row.get('authorization_code', '')),
-                    str(row.get('transaction_type', '')),
-                    str(row.get('transaction_category', '')),
-                    str(row.get('process_code', '')),
-                ]
-                key = '|'.join([c if c is not None else '' for c in components])
-                h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
-                return f"tx_{h}"
-
             try:
-                chunk['transaction_id'] = chunk.apply(_compute_tid_row_bg, axis=1)
+                chunk['transaction_id'] = _compute_transaction_ids(chunk)
             except Exception:
                 pass
             td = mapped.get('transaction_datetime')
@@ -765,7 +777,7 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
                 chunk['has_pinblock'] = chunk['has_pinblock'].apply(to_pin)
 
             if any(col in chunk.columns for col in MERCHANT_RUBRO_SOURCE_ALIASES):
-                chunk['merchant_rubro_proxy'] = chunk.apply(_pick_merchant_rubro_from_row, axis=1)
+                chunk['merchant_rubro_proxy'] = _pick_merchant_rubro_vectorized(chunk)
             elif 'merchant_rubro_proxy' not in chunk.columns:
                 chunk['merchant_rubro_proxy'] = 'UNKNOWN'
 
@@ -775,25 +787,7 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
             except Exception:
                 pass
 
-            import hashlib
-            def compute_tid(row):
-                components = [
-                    str(row.get('transaction_datetime', '')),
-                    str(row.get('amount', '')),
-                    str(row.get('customer_hash', '')),
-                    str(row.get('merchant_code', '')),
-                    str(row.get('terminal_code', '')),
-                    str(row.get('reference_number', '')),
-                    str(row.get('authorization_code', '')),
-                    str(row.get('transaction_type', '')),
-                    str(row.get('transaction_category', '')),
-                    str(row.get('process_code', '')),
-                ]
-                key = '|'.join([c if c is not None else '' for c in components])
-                h = hashlib.sha256(str(key).encode('utf-8')).hexdigest()[:16]
-                return f"tx_{h}"
-
-            chunk['transaction_id'] = chunk.apply(compute_tid, axis=1)
+            chunk['transaction_id'] = _compute_transaction_ids(chunk)
 
             def infer_brand(v):
                 try:
@@ -828,30 +822,32 @@ def import_dataset_background(dest_path: str, dataset_id: int, name: str, file_n
             invalid_count += len(invalid_df)
 
             valid_records = []
-            for _, row in valid_df.iterrows():
+            for rec in valid_df.to_dict('records'):
                 try:
-                    rec = {
-                        'transaction_id': str(row['transaction_id']),
-                        'amount': float(row['amount']),
-                        'transaction_type': row.get('transaction_type'),
-                        'channel': row.get('channel'),
-                        'location': row.get('location'),
-                        'device_id': row.get('device_id'),
-                        'customer_hash': row.get('customer_hash'),
-                        'merchant_hash': row.get('merchant_hash'),
-                        'merchant_rubro_proxy': row.get('merchant_rubro_proxy'),
-                        'merchant_code': row.get('merchant_code'),
-                        'terminal_code': row.get('terminal_code'),
-                        'merchant_name': row.get('merchant_name'),
-                        'country_code': row.get('country_code'),
-                        'pos_entry_mode': int(row['pos_entry_mode']) if (not pd.isna(row.get('pos_entry_mode')) and str(row.get('pos_entry_mode')) != 'nan') else None,
-                        'has_pinblock': int(row['has_pinblock']) if (not pd.isna(row.get('has_pinblock')) and str(row.get('has_pinblock')) != 'nan') else None,
-                        'card_brand': row.get('card_brand'),
-                        'masked_card': row.get('masked_card'),
-                        'transaction_datetime': row['transaction_datetime'].to_pydatetime() if not pd.isna(row['transaction_datetime']) else None,
-                        'is_fraud': bool(row['is_fraud']),
-                    }
-                    valid_records.append(rec)
+                    dt = rec.get('transaction_datetime')
+                    pe = rec.get('pos_entry_mode')
+                    pb = rec.get('has_pinblock')
+                    valid_records.append({
+                        'transaction_id': str(rec['transaction_id']),
+                        'amount': float(rec['amount']),
+                        'transaction_type': rec.get('transaction_type'),
+                        'channel': rec.get('channel'),
+                        'location': rec.get('location'),
+                        'device_id': rec.get('device_id'),
+                        'customer_hash': rec.get('customer_hash'),
+                        'merchant_hash': rec.get('merchant_hash'),
+                        'merchant_rubro_proxy': rec.get('merchant_rubro_proxy'),
+                        'merchant_code': rec.get('merchant_code'),
+                        'terminal_code': rec.get('terminal_code'),
+                        'merchant_name': rec.get('merchant_name'),
+                        'country_code': rec.get('country_code'),
+                        'pos_entry_mode': int(pe) if pe is not None and not pd.isna(pe) else None,
+                        'has_pinblock': int(pb) if pb is not None and not pd.isna(pb) else None,
+                        'card_brand': rec.get('card_brand'),
+                        'masked_card': rec.get('masked_card'),
+                        'transaction_datetime': dt.to_pydatetime() if hasattr(dt, 'to_pydatetime') and not pd.isna(dt) else None,
+                        'is_fraud': bool(rec.get('is_fraud', False)),
+                    })
                 except Exception:
                     invalid_count += 1
 

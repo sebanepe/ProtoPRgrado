@@ -48,7 +48,7 @@ def insert_transactions(db: Session, records: List[Dict], dataset_id: int | None
                 batch = records[i:i+batch_size]
                 stmt = pg_insert(Transaction.__table__).values(batch)
                 # conflict target is transaction_id + dataset_id (behavioral grouping)
-                stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id", "dataset_id"])
+                stmt = stmt.on_conflict_do_nothing(index_elements=["transaction_id"])
                 db.execute(stmt)
             db.commit()
             return len(records)

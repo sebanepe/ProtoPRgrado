@@ -18,6 +18,7 @@ if (api.interceptors && api.interceptors.request && typeof api.interceptors.requ
     } catch (e) { }
     return cfg
   })
+
 }
 
 export async function health(){ return api.get('/health').then(r=>r.data).catch(()=>null) }
@@ -172,7 +173,7 @@ export async function analyzeRules(preprocessedRunId, force = false, config = {}
     preprocessed_run_id: preprocessedRunId,
     force: force,
     config: config
-  }).then(r=> r.data)
+  }, { timeout: 600000 }).then(r=> r.data)
 }
 
 export async function getRulesSummary(runId, params = {}){
@@ -405,6 +406,44 @@ export async function getUnsupervisedInferenceStatus(runId) {
 
 export async function compareUnsupervisedRuns(runIdA, runIdB) {
   return api.get('/api/unsupervised/compare-runs', { params: { run_id_a: runIdA, run_id_b: runIdB } }).then(r => r.data)
+}
+
+// ============================================================
+// Phase D3: Apply trained supervised model to new datasets
+// ============================================================
+
+export async function getSupInferenceTrainedModels() {
+  return api.get('/api/supervised-inference/trained-models').then(r => r.data)
+}
+
+export async function getSupInferencePreprocessedRuns() {
+  return api.get('/api/supervised-inference/preprocessed-runs').then(r => r.data)
+}
+
+export async function getSupInferenceRuleSummaries() {
+  return api.get('/api/supervised-inference/rule-summaries').then(r => r.data)
+}
+
+export async function applySupInferenceModel(formData) {
+  return api.post('/api/supervised-inference/apply-trained-model', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data)
+}
+
+export async function getSupInferenceStatus(runId) {
+  return api.get(`/api/supervised-inference/inference-status/${runId}`).then(r => r.data)
+}
+
+export async function getSupInferencePredictionRuns() {
+  return api.get('/api/supervised-inference/prediction-runs').then(r => r.data)
+}
+
+export async function getSupInferencePredictionResults(runId, params = {}) {
+  return api.get('/api/supervised-inference/prediction-results', { params: { run_id: runId, ...params } }).then(r => r.data)
+}
+
+export async function getSupInferencePredictionReport(runId) {
+  return api.get('/api/supervised-inference/prediction-report', { params: { run_id: runId } }).then(r => r.data)
 }
 
 // ============================================================

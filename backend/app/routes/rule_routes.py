@@ -1296,7 +1296,9 @@ def list_preprocessed_runs() -> list[RunListItem]:
 
 
 @router.post("/analyze", response_model=RuleAnalyzeResponse)
-def analyze_rules(request: RuleAnalyzeRequest) -> RuleAnalyzeResponse:
+def analyze_rules(request: RuleAnalyzeRequest, db: Session = Depends(get_db)) -> RuleAnalyzeResponse:
+    from backend.app.services import artifact_registry_service as art_svc
+
     source_path = _processed_file(request.preprocessed_run_id)
     if not source_path.exists():
         raise HTTPException(
@@ -1309,7 +1311,27 @@ def analyze_rules(request: RuleAnalyzeRequest) -> RuleAnalyzeResponse:
     summary_path = _processed_dir() / f"alerts_summary_run_{run_token}.csv"
     report_path = _processed_dir() / f"rules_report_run_{run_token}.md"
 
+    def _register_artifacts() -> None:
+        for artifact_type, path in [
+            (art_svc.ARTIFACT_RULE_ALERTS_CSV, alerts_path),
+            (art_svc.ARTIFACT_RULE_SUMMARY_CSV, summary_path),
+            (art_svc.ARTIFACT_RULE_REPORT, report_path),
+        ]:
+            if path.exists():
+                try:
+                    art_svc.register_or_update_artifact(
+                        db,
+                        artifact_type=artifact_type,
+                        phase=art_svc.PHASE_B,
+                        source_run=request.preprocessed_run_id,
+                        run_token=run_token,
+                        file_path=str(path),
+                    )
+                except Exception:
+                    pass
+
     if not request.force and alerts_path.exists() and summary_path.exists() and report_path.exists():
+        _register_artifacts()
         source_df = pd.read_csv(source_path)
         alerts_df = pd.read_csv(alerts_path)
         summary_df = pd.read_csv(summary_path)
@@ -1329,6 +1351,7 @@ def analyze_rules(request: RuleAnalyzeRequest) -> RuleAnalyzeResponse:
         str(source_path),
         config={**(request.config or {}), "source_run": request.preprocessed_run_id},
     )
+    _register_artifacts()
     source_df = pd.read_csv(source_path)
     return RuleAnalyzeResponse(
         status="COMPLETED",

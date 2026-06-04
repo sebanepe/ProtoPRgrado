@@ -19,6 +19,7 @@ from backend.app.models.models import (
     RolePermission,
     RuleRun,
     SupervisedDatasetRun,
+    SupervisedInferenceRun,
     UnsupervisedInferenceRun,
     User,
 )
@@ -118,6 +119,7 @@ def ensure_traceability_tables():
         CaseManagementComment,
         CaseManagementHistory,
         UnsupervisedInferenceRun,
+        SupervisedInferenceRun,
     ):
         model.__table__.create(bind=engine, checkfirst=True)
 
