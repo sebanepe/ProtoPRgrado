@@ -177,6 +177,7 @@ function ReviewDonut({ data }) {
 export default function Dashboard() {
   const [state, setState] = useState({
     loading: true,
+    loadingSlow: false,
     partialError: false,
     overview: null,
     preprocessedRuns: [],
@@ -194,35 +195,47 @@ export default function Dashboard() {
   useEffect(() => {
     let mounted = true
     async function loadDashboard() {
-      const first = await Promise.allSettled([
-        getDashboardOverview({ source_run: SOURCE_RUN, anomaly_run: ANOMALY_RUN }),
+      // Fase 1: llamadas rápidas — renderizan el dashboard de inmediato
+      const fast = await Promise.allSettled([
         getPreprocessedRuns(),
-        getRulesSummary(SOURCE_RUN, { page: 1, page_size: 1 }),
-        getRulesAlerts(SOURCE_RUN, { page: 1, page_size: 1 }),
-        getAlertReviews(SOURCE_RUN, { page: 1, page_size: 1 }),
-        getHumanLabelSummary(SOURCE_RUN),
         getAnomalyRuns(),
         getSupervisedTrainingRuns(SOURCE_RUN),
-        getModelEvaluationSummary(SOURCE_RUN),
         getBatchScoringRuns(),
         getCasesSummary(),
       ])
       if (!mounted) return
-      setState({
+      setState(prev => ({
+        ...prev,
         loading: false,
-        partialError: first.some((item) => item.status === 'rejected'),
-        overview: resultValue(first[0]),
-        preprocessedRuns: normalizeItems(resultValue(first[1])),
-        groupedAlerts: resultValue(first[2]),
-        detailedAlerts: resultValue(first[3]),
-        reviews: resultValue(first[4]),
-        humanSummary: resultValue(first[5]),
-        anomalyRuns: resultValue(first[6]),
-        supervisedRuns: resultValue(first[7]),
-        evaluation: resultValue(first[8]),
-        scoringRuns: resultValue(first[9]),
-        casesSummary: resultValue(first[10]),
-      })
+        loadingSlow: true,
+        preprocessedRuns: normalizeItems(resultValue(fast[0])),
+        anomalyRuns: resultValue(fast[1]),
+        supervisedRuns: resultValue(fast[2]),
+        scoringRuns: resultValue(fast[3]),
+        casesSummary: resultValue(fast[4]),
+      }))
+
+      // Fase 2: llamadas lentas (CSV, agregaciones, evaluación de modelos)
+      const slow = await Promise.allSettled([
+        getDashboardOverview({ source_run: SOURCE_RUN, anomaly_run: ANOMALY_RUN }),
+        getRulesSummary(SOURCE_RUN, { page: 1, page_size: 1 }),
+        getRulesAlerts(SOURCE_RUN, { page: 1, page_size: 1 }),
+        getAlertReviews(SOURCE_RUN, { page: 1, page_size: 1 }),
+        getHumanLabelSummary(SOURCE_RUN),
+        getModelEvaluationSummary(SOURCE_RUN),
+      ])
+      if (!mounted) return
+      setState(prev => ({
+        ...prev,
+        loadingSlow: false,
+        partialError: slow.some(r => r.status === 'rejected'),
+        overview: resultValue(slow[0]),
+        groupedAlerts: resultValue(slow[1]),
+        detailedAlerts: resultValue(slow[2]),
+        reviews: resultValue(slow[3]),
+        humanSummary: resultValue(slow[4]),
+        evaluation: resultValue(slow[5]),
+      }))
     }
     loadDashboard()
     return () => { mounted = false }
@@ -285,7 +298,8 @@ export default function Dashboard() {
       </div>
 
       {state.loading && <div className="card status-banner status-info">Cargando resumen operativo...</div>}
-      {!state.loading && state.partialError && <div className="card status-banner status-error">Algunas métricas no pudieron cargarse.</div>}
+      {!state.loading && state.loadingSlow && <div className="card status-banner status-info">Cargando métricas de alertas y modelos...</div>}
+      {!state.loading && !state.loadingSlow && state.partialError && <div className="card status-banner status-error">Algunas métricas no pudieron cargarse.</div>}
 
       <div className="kpi-grid dashboard-kpis">
         <KPICard title="Transacciones procesadas" value={formatNumber(state.overview?.total_transactions)} />

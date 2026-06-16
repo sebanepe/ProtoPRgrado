@@ -248,7 +248,7 @@ export default function Preprocessing(){
           <div style={{marginTop:12}}>
             <h4>Run {runPreview.data.run.id} — Estado: {runPreview.data.run.status}</h4>
             <div style={{display:'flex',gap:20}}>
-              <div style={{flex:1}}>
+              <div style={{flex:1, minWidth:0}}>
                 <h5>Antes (DB)</h5>
                 <div className="table-scroll">
                   <table className="table small preprocessing-table">
@@ -261,7 +261,7 @@ export default function Preprocessing(){
                   </table>
                 </div>
               </div>
-              <div style={{flex:1}}>
+              <div style={{flex:1, minWidth:0}}>
                 <h5>Después (Procesado)</h5>
                 <div className="table-scroll">
                   <table className="table small preprocessing-table">
