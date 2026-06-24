@@ -152,7 +152,6 @@ describe('Traceability — Cuadro Resumen de Trazabilidad', () => {
   it('maneja error del backend con mensaje amigable', async () => {
     api.getImportAlertTraceabilitySummary.mockRejectedValue(new Error('Network error'))
     renderPage()
-    await waitFor(() => expect(api.getImportAlertTraceabilitySummary).toHaveBeenCalled())
-    expect(screen.getByText('Network error')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Network error')).toBeTruthy())
   })
 })
