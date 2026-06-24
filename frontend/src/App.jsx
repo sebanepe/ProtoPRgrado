@@ -14,6 +14,7 @@ import Cases from './pages/Cases'
 import RulesAlerts from './pages/RulesAlerts'
 import Users from './pages/Users'
 import Settings from './pages/Settings'
+import Traceability from './pages/Traceability'
 
 function App() {
   // Start with login screen by default (avoid flashing dashboard).
@@ -85,6 +86,7 @@ function App() {
           <Route path="/admin/users" element={<Users />} />
           <Route path="/users" element={<Navigate to="/admin/users" replace />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/traceability" element={<Traceability />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

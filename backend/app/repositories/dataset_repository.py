@@ -4,7 +4,7 @@ from sqlalchemy.sql import text
 import os
 
 
-def create_dataset(db: Session, *, name: str, file_name: str, total_records: int, valid_records: int, invalid_records: int, status: str = "imported", file_path: str = None, original_filename: str = None, source_type: str = "CSV"):
+def create_dataset(db: Session, *, name: str, file_name: str, total_records: int, valid_records: int, invalid_records: int, status: str = "imported", file_path: str = None, original_filename: str = None, source_type: str = "CSV", uploaded_by_id: int = None):
     """
     Create a dataset record using an explicit INSERT that only includes the
     legacy columns. This avoids failing when the models have additional
@@ -12,10 +12,9 @@ def create_dataset(db: Session, *, name: str, file_name: str, total_records: int
     After insert, refresh and return the Dataset instance.
     """
     orig = original_filename or file_name
-    # Use explicit column list matching the existing DB schema
     sql = text("""
-    INSERT INTO datasets (name, original_filename, file_name, file_path, source_type, total_records, valid_records, invalid_records, status)
-    VALUES (:name, :original_filename, :file_name, :file_path, :source_type, :total_records, :valid_records, :invalid_records, :status)
+    INSERT INTO datasets (name, original_filename, file_name, file_path, source_type, total_records, valid_records, invalid_records, status, uploaded_by_id)
+    VALUES (:name, :original_filename, :file_name, :file_path, :source_type, :total_records, :valid_records, :invalid_records, :status, :uploaded_by_id)
     RETURNING id
     """)
     try:
@@ -29,6 +28,7 @@ def create_dataset(db: Session, *, name: str, file_name: str, total_records: int
             'valid_records': valid_records,
             'invalid_records': invalid_records,
             'status': status,
+            'uploaded_by_id': uploaded_by_id,
         })
         new_id = res.scalar()
         db.commit()
@@ -45,6 +45,7 @@ def create_dataset(db: Session, *, name: str, file_name: str, total_records: int
             valid_records=valid_records,
             invalid_records=invalid_records,
             status=status,
+            uploaded_by_id=uploaded_by_id,
         )
         db.add(ds)
         db.commit()

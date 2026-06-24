@@ -219,13 +219,14 @@ def run_preprocessing(db: Session, output_path: str | None = None, apply_smote: 
         raise
 
 
-def create_run(db: Session, dataset_id: int | None = None, apply_smote: bool = True) -> PreprocessingRun:
+def create_run(db: Session, dataset_id: int | None = None, apply_smote: bool = True, executed_by_id: int | None = None) -> PreprocessingRun:
     """Create a PreprocessingRun row in PENDING state and return it."""
     run = PreprocessingRun(
         status="PENDING",
         started_at=None,
         params_json=str({"apply_smote": bool(apply_smote), "dataset_id": dataset_id}),
         input_dataset_id=dataset_id,
+        executed_by_id=executed_by_id,
     )
     db.add(run)
     db.commit()

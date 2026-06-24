@@ -9,13 +9,14 @@ import pandas as pd
 import numpy as np
 from backend.app.models.models import PreprocessingRun, Transaction
 from backend.app.services.permission_service import require_permission
+from backend.app.services.authorization import get_user_from_header
 from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/preprocessing", tags=["preprocessing"])
 
 
 @router.post("/run")
-def run_preprocessing(background_tasks: BackgroundTasks, dataset_id: int | None = None, db: Session = Depends(get_db), _auth=Depends(require_permission("preprocess"))):
+def run_preprocessing(background_tasks: BackgroundTasks, dataset_id: int | None = None, db: Session = Depends(get_db), current_user=Depends(get_user_from_header), _auth=Depends(require_permission("preprocess"))):
     """Start a preprocessing run asynchronously.
 
     This endpoint creates a PreprocessingRun row (PENDING) and schedules the
@@ -23,7 +24,7 @@ def run_preprocessing(background_tasks: BackgroundTasks, dataset_id: int | None 
     poll progress.
     """
     try:
-        run = preprocessing_service.create_run(db, dataset_id=dataset_id, apply_smote=True)
+        run = preprocessing_service.create_run(db, dataset_id=dataset_id, apply_smote=True, executed_by_id=getattr(current_user, 'id', None))
         # schedule background execution (uses its own DB session)
         background_tasks.add_task(preprocessing_service.run_preprocessing_background, run.id)
     except Exception as e:

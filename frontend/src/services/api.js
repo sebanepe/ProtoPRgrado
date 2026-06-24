@@ -477,4 +477,8 @@ export async function getModelEvaluationTopCases(sourceRun, limit = 20){
   return api.get('/api/model-evaluation/top-cases', { params: { source_run: sourceRun, limit } }).then(r => r.data)
 }
 
+export async function getImportAlertTraceabilitySummary() {
+  return api.get('/api/traceability/import-alert-summary').then(r => r.data)
+}
+
 export default api

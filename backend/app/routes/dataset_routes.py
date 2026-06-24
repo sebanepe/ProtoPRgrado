@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from backend.app.database import get_db
 from backend.app.services import dataset_service
 from backend.app.services.permission_service import require_permission
+from backend.app.services.authorization import get_user_from_header
 from backend.app.repositories import dataset_repository
 import pandas as pd
 import os
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
 @router.post("/import")
-def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), _auth=Depends(require_permission("import_data"))):
+def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTasks = None, db: Session = Depends(get_db), current_user=Depends(get_user_from_header), _auth=Depends(require_permission("import_data"))):
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Only CSV files are supported')
 
@@ -75,7 +76,7 @@ def import_dataset(file: UploadFile = File(...), background_tasks: BackgroundTas
 
     # create dataset record in DB with status 'importing'
     try:
-        dataset = dataset_repository.create_dataset(db, name=file.filename, file_name=safe_name, file_path=dest_path, original_filename=file.filename, total_records=0, valid_records=0, invalid_records=0, status='importing')
+        dataset = dataset_repository.create_dataset(db, name=file.filename, file_name=safe_name, file_path=dest_path, original_filename=file.filename, total_records=0, valid_records=0, invalid_records=0, status='importing', uploaded_by_id=getattr(current_user, 'id', None))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed creating dataset record: {e}")
 
