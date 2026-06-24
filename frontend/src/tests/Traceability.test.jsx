@@ -122,8 +122,7 @@ describe('Traceability — Cuadro Resumen de Trazabilidad', () => {
   it('muestra Sin reglas para dataset con prep pero sin rule run y sin artefactos', async () => {
     api.getImportAlertTraceabilitySummary.mockResolvedValue([rowNoRuleRun])
     renderPage()
-    await waitFor(() => expect(api.getImportAlertTraceabilitySummary).toHaveBeenCalled())
-    expect(screen.getByText('Sin reglas')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Sin reglas')).toBeTruthy())
   })
 
   it('muestra estado DERIVADO y conteos cuando existen artefactos sin RuleRun', async () => {
